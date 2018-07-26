@@ -1,0 +1,6 @@
+# Package dependencies of the Keck-FOBOS/enyo
+numpy>=1.13.3
+scipy>=1.0
+matplotlib>=2.1.0
+astropy>=3.0
+
