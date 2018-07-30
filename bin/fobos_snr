@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+import os
+import time
+import numpy
+
+from enyo.etc.etc import SpectrumSNR
+
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    t = time.clock()
+
+        reff = 0.1
+        sersic_index = 1
+        spectrum_type = 'constant'
+        redshift = 0.0
+
+        seeing = 0.8
+
+        resolution = 5000       # lambda/delta lambda
+        spectral_fwhm = 3       # pixels
+        spectral_width = 1      # number of delta lambda
+        spatial_fwhm = 3        # pixels
+        spatial_width = 1       # number of spatial fwhm
+
+        rn = 1.                 # Detector readnoise
+        dark = 0.               # Detector dark-current
+        qe = 0.9                # Detector quantum efficiency (e-/photon)
+
+        normalizing_band = 'g'  # Band used to normalize the source spectrum
+        magnitude = 25          # AB magnitude of source
+        exposure_time = 1       # Exposure time in seconds
+
+    
+
+    print('Elapsed time: {0} seconds'.format(time.clock() - t))
+
+
+
