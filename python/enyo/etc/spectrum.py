@@ -8,6 +8,8 @@ import os
 import numpy
 from scipy import interpolate
 from astropy.io import fits
+import astropy.constants
+import astropy.units
 
 def spectral_coordinate_step(wave, log=False, base=10.0):
     """
@@ -46,6 +48,8 @@ class FilterResponse:
         self.interpolator = interpolate.interp1d(self.response_func[:,0], self.response_func[:,1],
                                                  bounds_error=False, fill_value=0.0,
                                                  assume_sorted=True)
+    def __call__(self, wave):
+        return self.interpolator(wave)
 
 class Spectrum:
     """
@@ -88,15 +92,18 @@ class Spectrum:
         return dw
 
     def rescale_flux(self, wave, flux):
+        """
+        input flux should be in units of  1e-17 erg/s/cm^2/angstrom.
+        """
         self.interpolator.y *= flux/self.interp(wave)
 
     def rescale_magnitude(self, band, new_mag, system='AB'):
         # Get the current magnitude
         dw = self.wavelength_step()
-        band_weighted_mean = numpy.sum(band.interpolator(self.wave)*self.flux*dw) \
-                                / numpy.sum(band.interpolator(self.wave)*dw)
-        band_weighted_center = numpy.sum(band.interpolator(self.wave)*self.wave*self.flux*dw) \
-                                / numpy.sum(band.interpolator(self.wave)*self.flux*dw)
+        band_weighted_mean = numpy.sum(band(self.wave)*self.flux*dw) \
+                                / numpy.sum(band(self.wave)*dw)
+        band_weighted_center = numpy.sum(band(self.wave)*self.wave*self.flux*dw) \
+                                / numpy.sum(band(self.wave)*self.flux*dw)
         # units are 1e-17 erg/s/cm^2/angstrom
         if system == 'AB':
             current_mag = -2.5*numpy.log10(3.34e4*numpy.square(band_weighted_center)
@@ -108,11 +115,11 @@ class Spectrum:
 
     def photon_flux(self):
         """
-        Convert the spectrum from erg/s/cm^2/angstrom to photons/s/cm^2
+        Convert the spectrum from erg/s/cm^2/angstrom to photons/s/cm^2/angstrom
         """
         ergs_per_photon = astropy.constants.h.to('erg s') * astropy.constants.c.to('angstrom/s') \
                             / (self.wave * astropy.units.angstrom)
-        return self.interpolator.y * self.wavelength_step() / ergs_per_photon.value
+        return 1e-17*self.interpolator.y / ergs_per_photon.value
 
 
 # 8329-6104

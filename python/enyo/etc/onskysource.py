@@ -138,7 +138,7 @@ class OnSkySource:
         # Determine the sampling
         self.seeing_fwhm = seeing_fwhm           # arcsec
         self.sampling = self.seeing_fwhm/20      # arcsec / pixel
-        if intrinsic is not None:
+        if not isinstance(intrinsic, (int, float)):
             minsampling = intrinsic.minimum_sampling()  # arcsec/pixel
             self.sampling = min(minsampling, self.sampling)
 

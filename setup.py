@@ -19,7 +19,7 @@ MINIMUM_PYTHON_VERSION = '3.5'
 def get_data_files():
     """Generate the list of data files."""
     data_files = []
-    data_roots = [ 'data', ]
+    data_roots = [ 'data' ]
     for root in data_roots:
         for path, directories, files in os.walk(root):
             for f in files:
