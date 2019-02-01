@@ -73,14 +73,79 @@ import numpy
 
 from matplotlib import pyplot
 
-from . import onskysource, efficiency, telescopes, spectrum, extract
+from . import onskysource, efficiency, telescopes, spectrum, extract, aperture
 
 class SNRSpectrum:
-    def __init__(self, magnitude, exposure_time, seeing, airmass, resolution, rn, dark, qe,
-                 spectrograph='wfos', fiber_diameter=1., spectral_fwhm=3, spectral_width=1,
-                 spatial_fwhm=3, spatial_width=1, surface_brightness=None, reff=None,
-                 sersic_index=None, redshift=0.0, spectrum_type='constant', normalizing_band='g',
-                 sky='maunakea'):
+    """
+    Produce a S/N spectrum for an observation.
+
+    Args:
+        magnitude (scalar-like):
+            Apparent magnitude of the source.
+        exposure_time (scalar-like):
+            The total exposure time in seconds.
+        seeing (scalar-like):
+            The FWHM of the Gaussian seeing distribution in arcsec.
+        airmass (scalar-like):
+            The airmass of the observation.
+        resolution (array-like):
+            1D spectral resolution (:math:`R = \lambda/\Delta\lambda`).
+            Must be a scalar or match the length of the source spectrum
+            wavelength vector.
+        rn (scalar-like):
+            Detector read noise in electrons.
+        dark (scalar-like):
+            Detector dark current in electrons per second.
+        qe (scalar-like):
+            Detector quantum efficiency (wavelength indepedent).
+        spectrograph_throughput
+            (:class:`efficiency.SpectrographThroughput`, optional):
+            The spectrograph throughput objects.  If not provided, uses
+            data in data/efficiency/fiber_wfos_throughput.db.
+        fiber_diameter (scalar-like, optional):
+            On-sky diameter of the fiber in arcseconds.
+        spectral_fwhm (scalar-like, optional):
+            The FHWM of the Gaussian line-spread function of the
+            instrument at the detector in pixels.
+        spectral_width (scalar-like, optional):
+            The extraction width of the spectral pixel in number of FWHM.
+        spatial_fwhm (scalar-like, optional):
+            The FHWM of the Gaussian point-spread function of the
+            fiber on the detector in pixels.
+        spatial_width (scalar-like, optional):
+            The extraction width of the spatial pixel in number of FWHM.
+        surface_brightness (scalar-like, optional):
+            Central surface brightness of the object is AB mag /
+            arcsec^2.
+        reff (scalar-like, optional):
+            The effective (half-light) radius in pixels.
+        sersic_index (scalar-like, optional):
+            The Sersic index.
+        redshift (scalar-like, optional):
+            Redshift of the source.
+        spectrum (:obj:`str`, :class:`spectrum.Spectrum`, optional):
+            The spectrum of the source.  Can be a spectrum object, a
+            string used to set the object, or a file name read using
+            :func:`enyo.etc.spectrum.Spectrum.from_file`.  Cannot be
+            None.
+        sky (:obj:`str`, :class:`spectrum.Spectrum`, optional):
+            The spectrum of the night-sky.  Can be a spectrum object, a
+            string used to set the object, or a file name read using
+            :func:`enyo.etc.spectrum.Spectrum.from_file`.  Cannot be
+            None.
+        normalizing_band (:obj:`str`, optional):
+            Rest-frame broad-band filter in which the magnitude or
+            surface brightness is defined.
+    """
+    def __init__(self, source_distribution, source_spectrum, sky_spectrum, atmospheric_throughput,
+                 seeing, telescope, system_throughput, aperture, extraction, exposure_time,
+                 resolution):
+
+#    def __init__(self, magnitude, exposure_time, seeing, airmass, resolution, rn, dark, qe,
+#                 spectrograph='wfos', fiber_diameter=1., spectral_fwhm=3, spectral_width=1,
+#                 spatial_fwhm=3, spatial_width=1, surface_brightness=None, reff=None,
+#                 sersic_index=None, redshift=0.0, spectrum_type='constant', sky='maunakea',
+#                 normalizing_band='g'):
         
         self.redshift = redshift                # Object redshift
         self.magnitude = magnitude              # AB magnitude of source
@@ -134,7 +199,7 @@ class SNRSpectrum:
         # Rescale source spectrum to the input magnitude or surface
         # brightness
         print('band')
-        self.band = spectrum.FilterResponse(band=self.normalizing_band)
+        self.band = efficiency.FilterResponse(band=self.normalizing_band)
         print('source rescale')
         self.source_spectrum.rescale_magnitude(self.band, self.magnitude 
                                 if self.surface_brightness is None else self.surface_brightness)

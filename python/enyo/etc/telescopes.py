@@ -8,11 +8,35 @@ import numpy
 
 class Telescope:
     """
-    diameter is in m
+    Collect useful telescope parameters.
 
-    area in cm^2
+    Args:
+        longitude (scalar-like):
+            Earth coordinate with the location of the telescope in degrees.
+        latitude (scalar-like):
+            Earth coordinate with the location of the telescope in degrees.
+        elevation (scalar-like):
+            Earth elevation above sea level of the telescope in meters.
+        platescale (scalar-like):
+            Telescope platescale in mm/arcsec.
+        diameter (scalar-like, optional):
+            Telescope diameter in meters.  If provided, used to set the
+            telescope area.  Must be provided if `area` is not.
+        area (scalar-like, optional):
+            The true or effective area of the telescope aperture in
+            square centimeters.  If not provided, calculated using
+            `diameter`.  Must be provided if `diameter` is not.
+        obstruction (scalar-like, optional):
+            The unitless fraction of the total telescope area lost due
+            to the central obstruction.  If provided, the telescope area
+            is multiplied by (1-`obstruction`) to obtain its effective
+            area.  If not provided, the `area` or `diameter` is assumed
+            to account for the central obstruction.
 
-    obstruction is in fraction of total area
+    Raises:
+        ValueError:
+            Raised if both or neither of `diameter` or `area` are
+            provoded.
     """
     def __init__(self, longitude, latitude, elevation, platescale, diameter=None, area=None,
                  obstruction=None):
@@ -32,8 +56,13 @@ class Telescope:
         elif diameter is not None:
             self.diameter = diameter
             self.area = numpy.pi*numpy.square(self.diameter*100/2)
+        else:
+            raise ValueError('Must provide area or diameter!')
+
+        # Apply the central obsruction if provided.
         if obstruction is not None:
             self.area *= (1-obstruction)
+
 
 class KeckTelescope(Telescope):
     def __init__(self):
@@ -41,6 +70,7 @@ class KeckTelescope(Telescope):
 
 
 class Observation:
+    """Not yet implemented..."""
     def __init__(self, airmass, sky_brightness, exposure_time, wavelength=None, band=None):
         if wavelength is None and band is None:
             raise ValueError('Must provide band or wavelength.')

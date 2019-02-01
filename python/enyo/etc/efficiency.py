@@ -14,9 +14,23 @@ from scipy import interpolate
 from . import onskysource
 
 class Efficiency:
+    """
+    Base class for efficiency data.
+
+    .. todo::
+        - Allow for x,y detector pixel to convert to wavelength and
+          pseudo-slit/slit position; field angle fixed for fiber
+          pseudo-slit, not for imaging spectrograph machined slit
+        - Allow for x,y focal plane position to convert to detector
+          pixel
+
+    Args:
+        wave (array-like):
+            1D array with wavelengths.
+        eta (array-like):
+            1D array with efficiency data.
+    """
     def __init__(self, wave, eta):
-        print(len(wave))
-        print(len(eta))
         self.interpolator = interpolate.interp1d(wave, eta, assume_sorted=True, bounds_error=False,
                                                  fill_value=0.0)
     
@@ -41,6 +55,29 @@ class Efficiency:
     @property
     def eta(self):
         return self.interpolator.y
+
+
+class FilterResponse(Efficiency):
+    """
+    The efficiency of a broad-band filter.
+
+    Args:
+        band (:obj:`str`, optional):
+            The band to use.  Options are for the response functions in
+            the data/broadband_filters directory.
+
+    Raises:
+        FileNotFoundError:
+            Raised if the default file for the given band is not
+            available.
+    """
+    def __init__(self, band='g'):
+        data_file = os.path.join(os.environ['ENYO_DIR'], 'data', 'broadband_filters',
+                                 'gunn_2001_{0}_response.db'.format(band))
+        if not os.path.isfile(data_file):
+            raise FileNotFoundError('No file: {0}'.format(data_file))
+        db = numpy.genfromtxt(data_file)
+        super(FilterResponse, self).__init__(db[:,0], db[:,1])
 
 
 class SpectrographThroughput(Efficiency):
@@ -125,53 +162,61 @@ class AtmosphericThroughput(Efficiency):
 
 class ApertureEfficiency(Efficiency):
     """
+    Compute the efficiency (extracted compared to total flux) of an
+    on-sky, circular aperture.
+
     .. todo::
         - Allow source distribution to be wavelength dependent
         - Allow aperture to be a shape other than circular
         - Use total flux from source object
 
     Args:
-        diameter (float):
-            Fiber diameter.  Can be micron or arcsec.  Assumed to be
-            micron if platescale provide, otherwise assumed to be
-            arcsec.
-        platescale (float):
+        diameter (:obj:`float`):
+            Aperture diameter in micron or arcsec.  Assumed to be micron
+            if `platescale` provided, otherwise assumed to be arcsec.
+        platescale (:obj:`float`, optional):
             Focal-plane plate scale in mm/arcsec.
-        source (int, float, object):
-            The intrinsic source surface brightness distribution.  If a
-            scalar is provided, a point source is assumed.  See
-            :class:`enyo.etc.onskysource.OnSkySource`.
-        seeing (float):
+        source (scalar-like or object, optional):
+            The *intrinsic* source surface brightness distribution.  If
+            a scalar is provided, a point source is assumed.  This is
+            passed as the argument `intrinsic` to
+            :class:`enyo.etc.onskysource.OnSkySource`; see there for
+            further information.
+        seeing (scalar-like, optional):
             FWHM of a Gaussian seeing disk.
-        pointing_offset(tuple):
+        pointing_offset (array-like, optional):
             x,y offset of the pointing from the center of the object.
+
     """
     def __init__(self, wave, diameter, platescale=None, source=None, seeing=None,
                  pointing_offset=None):
-        self.diameter = diameter
-        if platescale is not None:
-            # Assume diameter is in micron
-            self.diameter *= 1e-3*platescale
+        # Set the aperture dimater
+        self.diameter = diameter if platescale is None else diameter*1e-3*platescale
+        # Get the on-sky source distribution
         self.source = onskysource.OnSkySource(seeing, intrinsic=source, offset=pointing_offset)
+        # Find the pixels of the source within the aperture
         indx = numpy.square(self.source.x) + numpy.square(self.source.y) < numpy.square(diameter/2)
+        # Get the (scalar) efficiency of the observation
         self.total = numpy.full_like(wave, numpy.sum(self.source.data[indx])/self.source.integral)
+        # Instantiate
         super(ApertureEfficiency, self).__init__(wave, self.total)
 
 
 class Detector:
     """
-    Define the detector statistics
+    Define the detector statistics.
 
     .. todo:
         - include pixel size
         - spatial and spectral pixel scale
+        - why isn't efficiency the base class for this?
 
     Args:
         rn (:obj:`float`, optional):
             Read-noise in electrons.
         dark (:obj:`float`, optional):
             Dark current in electrons per second.
-        qa (:obj:`float`, optional):
+        qa (:obj:`float`, :class:`Efficiency`, optional):
             Detector quantum efficiency.
     """
     def __init__(self, rn=1., dark=0., qe=0.9):
@@ -187,7 +232,5 @@ class Detector:
         elif not hasattr(wave, '__len__'):
             return self.qe
         return self.qe if wave is None else numpy.full_like(wave, self.qe, dtype=float)
-
-
 
 

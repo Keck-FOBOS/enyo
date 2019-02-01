@@ -5,7 +5,7 @@ from scipy import special
 
 class Extraction:
     """
-    spatial_fwhm is the number of detector pixels per fwhm
+    fwhm is the number of detector pixels per fwhm
     
     width is the number of fwhm to extract
     """
