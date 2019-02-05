@@ -73,7 +73,7 @@ import numpy
 
 from matplotlib import pyplot
 
-from . import onskysource, efficiency, telescopes, spectrum, extract, aperture
+from . import source, efficiency, telescopes, spectrum, extract, aperture
 
 class SNRSpectrum:
     """

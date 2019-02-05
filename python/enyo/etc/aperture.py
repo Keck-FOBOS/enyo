@@ -2,27 +2,26 @@
 # -*- encoding utf-8 -*-
 """
 Define apertures to use for on-sky integrations.
-
-Requires the python packages shapely_ and rtree_; the latter is python
-wrapper for and requires the C++ library libspatialindex_.
-
-.. _shapely: https://shapely.readthedocs.io/en/stable/
-.. _rtree: http://toblerity.org/rtree/
-.. _libspatialindex: https://libspatialindex.github.io/
-
-.. _shapely.buffer: https://shapely.readthedocs.io/en/stable/manual.html#object.buffer
-
 """
+
+#Requires the python packages shapely_ and rtree_; the latter is python
+#wrapper for and requires the C++ library libspatialindex_.
+#
+#.. _shapely: https://shapely.readthedocs.io/en/stable/
+#.. _rtree: http://toblerity.org/rtree/
+#.. _libspatialindex: https://libspatialindex.github.io/
+#
+#.. _shapely.buffer: https://shapely.readthedocs.io/en/stable/manual.html#object.buffer
 
 import os
 import numpy
 import time
 
-from rtree import index
+#from rtree import index
+#from shapely.geometry.polygon import Polygon
+#import shapely.prepared
 from shapely.geometry import Point, asPolygon
-from shapely.geometry.polygon import Polygon
 from shapely.affinity import rotate
-import shapely.prepared
 
 class Aperture:
     """
@@ -49,6 +48,13 @@ class Aperture:
                 The list of y coordinates for the grid.  Must be
                 linearly spaced.
             method (:obj:`str`, optional):
+                Method used to construct the overlap grid.  Options
+                are::
+                    - 'whole': Any grid cell with its center inside the
+                      aperture is set to 1.  All others set to 0.
+                    - 'fractional': Perform the detailed calculation of
+                      the fraction of each grid-cell within the
+                      aperture.
     
         Returns:
             numpy.ndarray: An array with shape (nx, ny) with the
@@ -63,9 +69,13 @@ class Aperture:
         # Check input
         if len(x) < 2 or len(y) < 2:
             raise ValueError('Must provide at least 2 points per grid point.')
-        if numpy.any(numpy.diff(numpy.diff(x)) > 0):
+        minimum_x_difference = 0 if numpy.issubdtype(x.dtype, numpy.integer) \
+                                    else numpy.finfo(x.dtype).eps*10
+        minimum_y_difference = 0 if numpy.issubdtype(y.dtype, numpy.integer) \
+                                    else numpy.finfo(y.dtype).eps*10
+        if numpy.any(numpy.absolute(numpy.diff(numpy.diff(x))) > minimum_x_difference):
             raise ValueError('X coordinates are not regular to numerical precision.')
-        if numpy.any(numpy.diff(numpy.diff(y)) > 0):
+        if numpy.any(numpy.absolute(numpy.diff(numpy.diff(y))) > minimum_y_difference):
             raise ValueError('Y coordinates are not regular to numerical precision.')
 
         # Grid shape
@@ -74,45 +84,50 @@ class Aperture:
 
         if method == 'whole':
             # Only include whole pixels
-            x,y = map(lambda x : x.ravel(), numpy.meshgrid(x, y)) #, indexing='ij'))
+            X,Y = map(lambda x : x.ravel(), numpy.meshgrid(x, y))
             return numpy.array(list(map(lambda x: self.shape.contains(Point(x[0],x[1])),
-                                        zip(x,y)))).reshape(nx,ny).astype(int)
+                                        zip(X,Y)))).reshape(ny,nx).astype(int)
 
         elif method == 'fractional':
             # Allow for fractional pixels by determining the overlap
             # between the shape and each grid cell
 
             # Build the cell polygons
-            cells = Aperture._get_grid_tree(x, y)[0]
+            cells, sx, ex, sy, ey = self._overlapping_grid_polygons(x, y)
 
             # Construct a grid with the fractional area covered by the
             # aperture
-            return numpy.array(list(map(lambda x: self.shape.intersection(x).area,
-                                        cells))).reshape(nx,ny)
+            img = numpy.zeros((len(y), len(x)), dtype=float)
+            img[sy:ey,sx:ex] = numpy.array(list(map(lambda x: self.shape.intersection(x).area,
+                                                cells))).reshape(ey-sy,ex-sx)
+            return img
+            
+#            return numpy.array(list(map(lambda x: self.shape.intersection(x).area,
+#                                        cells))).reshape(nx,ny)
 
         raise ValueError('Unknown grid_overlap method {0}.'.format(method))
 
-        # OLD and slow
-        cells, tree = Aperture._get_grid_tree(x, y, fast=False)
-        alpha = numpy.zeros((nx,ny), dtype=float)
-        for k in tree.intersection(self.shape.bounds):
-            i = k//ny
-            j = k - i*ny
-            alpha[i,j] = cells[k].intersection(self.shape).area
-        return alpha
+#        # OLD and slow
+#        cells, tree = Aperture._get_grid_tree(x, y, fast=False)
+#        alpha = numpy.zeros((nx,ny), dtype=float)
+#        for k in tree.intersection(self.shape.bounds):
+#            i = k//ny
+#            j = k - i*ny
+#            alpha[i,j] = cells[k].intersection(self.shape).area
+#        return alpha
 
-    @staticmethod
-    def _get_grid_tree(x, y, fast=True):
+    def _overlapping_grid_polygons(self, x, y):
         r"""
-        Construct the polygons and RTree for searching.
+        Construct the list grid-cell polygons (rectangles) that are
+        expected to overlap the aperture.
 
         The list of polygons follows array index order.  I.e., polygon
-        :math:`k` is the cell at location :math:`(i,j)`, where::
+        :math:`k` is the cell at location :math:`(j,i)`, where::
 
         .. math::
             
-            i = k//ny
-            j = k - i*ny 
+            j = k//nx
+            i = k - j*nx
 
         Args:
             x (array-like):
@@ -121,40 +136,58 @@ class Aperture:
             y (array-like):
                 The list of y coordinates for the grid.  Must be
                 linearly spaced.
-            fast (:obj:`bool`, optional):
-                Skip the construction of the search tree.  The tree is
-                returned as None.
         
         Returns:
-            Two objects are returned:
-                - a list of shapely.geometry.polygon.Polygon objects, on
-                  per grid cell
-                - an rtree index object for quickly finding the
-                  intersection between these grid cells and the aperture
-                  polygon.
+            Four objects are returned:
+                - A list of shapely.geometry.polygon.Polygon objects, on
+                  per grid cell.  Only those grid cells that are
+                  expected to overlap the shape's bounding box are
+                  included.
+                - The starting and ending x index and the starting and
+                  ending y index for the returned list of cell polygons.
         """
         # Get the cell size
         dx = abs(x[1]-x[0])
         dy = abs(y[1]-y[0])
 
+        # Find the x coordinates of the grid cells that overlap the shape
+        xlim = list(self.shape.bounds[::2])
+        if xlim[0] > xlim[1]:
+            xlim = xlim[::-1]
+        xindx = (x+0.5*dx > xlim[0]) & (x-0.5*dx < xlim[1])
+        sx = numpy.arange(len(x))[xindx][0]
+        ex = numpy.arange(len(x))[xindx][-1]+1
+
+        # Find the y coordinates of the grid cells that overlap the shape
+        ylim = list(self.shape.bounds[1::2])
+        if ylim[0] > ylim[1]:
+            ylim = ylim[::-1]
+        yindx = (y+0.5*dy > ylim[0]) & (y-0.5*dy < ylim[1])
+        sy = numpy.arange(len(y))[yindx][0]
+        ey = numpy.arange(len(y))[yindx][-1]+3
+
         # Construct the grid
-        x,y = map(lambda x : x.ravel(), numpy.meshgrid(x, y)) #, indexing='ij'))
+        X,Y = map(lambda x : x.ravel(), numpy.meshgrid(x[sx:ex], y[sy:ey]))
 
         # Construct the polygons
-        cx = x[:,None] + (numpy.array([-0.5,0.5,0.5,-0.5])*dx)[None,:]
-        cy = y[:,None] + (numpy.array([-0.5,-0.5,0.5,0.5])*dy)[None,:]
-        polygons = [asPolygon(p) for p in 
-                                numpy.append(cx, cy, axis=1).reshape(-1,2,4).transpose(0,2,1)]
-        if fast:
-            return polygons, None
+        cx = X[:,None] + (numpy.array([-0.5,0.5,0.5,-0.5])*dx)[None,:]
+        cy = Y[:,None] + (numpy.array([-0.5,-0.5,0.5,0.5])*dy)[None,:]
 
-        # Build the polygon tree
-#        if use_strtree:
-#            return polygons, STRtree(polygons)
-        tree = index.Index()
-        for i, p in enumerate(polygons):
-            tree.insert(i,p.bounds)      
-        return polygons, tree
+        boxes = numpy.append(cx, cy, axis=1).reshape(-1,2,4).transpose(0,2,1)
+        polygons = [asPolygon(box) for box in boxes]
+        
+        return polygons, sx, ex, sy, ey
+
+#        if fast:
+#            return polygons, None,
+
+#        # Build the polygon tree
+##        if use_strtree:
+##            return polygons, STRtree(polygons)
+#        tree = index.Index()
+#        for i, p in enumerate(polygons):
+#            tree.insert(i,p.bounds)      
+#        return polygons, tree
 
     @property
     def area(self):
@@ -180,6 +213,8 @@ class FiberAperture(Aperture):
             is to use shapely_ default.
     """
     def __init__(self, cx, cy, d, resolution=None):
+        self.center = (cx,cy)
+        self.diamter = d
         kw = {} if resolution is None else {'resolution':resolution}
         super(FiberAperture, self).__init__(Point(cx,cy).buffer(d/2, **kw))
 
@@ -208,6 +243,9 @@ class SlitAperture(Aperture):
             Slit length along the unrotated y axis.
     """
     def __init__(self, cx, cy, width, length, rotation=0.):
+        self.center = (cx,cy)
+        self.width = width
+        self.length = length
         x = numpy.array([-width/2, width/2])+cx
         y = numpy.array([-length/2, length/2])+cy
         square = asPolygon(numpy.append(numpy.roll(numpy.repeat(x,2),-1),

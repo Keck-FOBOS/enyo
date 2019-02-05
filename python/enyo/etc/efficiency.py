@@ -11,7 +11,7 @@ from matplotlib import pyplot
 
 from scipy import interpolate
 
-from . import onskysource
+from . import source
 
 class Efficiency:
     """
@@ -188,12 +188,12 @@ class ApertureEfficiency(Efficiency):
             x,y offset of the pointing from the center of the object.
 
     """
-    def __init__(self, wave, diameter, platescale=None, source=None, seeing=None,
+    def __init__(self, wave, diameter, platescale=None, seeing=None, intrinsic=None,
                  pointing_offset=None):
         # Set the aperture dimater
         self.diameter = diameter if platescale is None else diameter*1e-3*platescale
         # Get the on-sky source distribution
-        self.source = onskysource.OnSkySource(seeing, intrinsic=source, offset=pointing_offset)
+        self.source = source.OnSkySource(seeing, intrinsic=source, offset=pointing_offset)
         # Find the pixels of the source within the aperture
         indx = numpy.square(self.source.x) + numpy.square(self.source.y) < numpy.square(diameter/2)
         # Get the (scalar) efficiency of the observation
