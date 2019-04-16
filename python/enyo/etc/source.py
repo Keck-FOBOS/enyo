@@ -3,6 +3,7 @@
 """
 Define an on-sky source distribution
 """
+import warnings
 import numpy
 
 from scipy import signal, special, interpolate
@@ -16,10 +17,20 @@ class Source:
     This is an abstract class an cannot be instantiated on it's own!
 
     Attributes:
-        x (vector): 1D vector with x coordinates
-        X (array): 2D map of x coordinates
-        y (vector): 1D vector with y coordinates
-        Y (array): 2D map of y coordinates
+        x (vector):
+            1D vector with x coordinates
+        X (array):
+            2D map of x coordinates
+        y (vector):
+            1D vector with y coordinates
+        Y (array):
+            2D map of y coordinates
+        data (array):
+            Map of the surface brightness distribution
+        sampling (float):
+            Sampling of the square map in arcsec/pixel.
+        size (float):
+            Size of the square map in arcsec.
     """
     def __init__(self):
         self.x = None
@@ -40,7 +51,9 @@ class Source:
         pass
 
     def make_map(self, sampling=None, size=None):
-        """Generate a map of the distribution."""
+        """
+        Generate a square map of the surface-brightness distribution.
+        """
         if sampling is None and self.sampling is None:
             self.sampling = self.minimum_sampling()
         elif sampling is not None:
@@ -320,14 +333,28 @@ class OnSkySource(Source):
         self.y = self.seeing.y
         self.Y = self.seeing.Y
         try:
+            # Construct the intrinsic map of the source
             self.intrinsic.make_map(sampling=self.sampling, size=self.size)
-            self.data = signal.fftconvolve(self.intrinsic.data, self.seeing.data, mode='same')
+            # Convolve with the seeing distribution, conserving the
+            # integral of the intrinsic source
+            self.data = signal.fftconvolve(self.intrinsic.data,
+                                           self.seeing.data * numpy.square(self.sampling),
+                                           mode='same')
         except AttributeError:
+            # Renormalize the unity-integral seeing kernal for to
+            # represent a point source
             self.data = self.intrinsic*self.seeing.data
 
         # Get the integral
         try:
+            # After convolving with the seeing kernel, the total
+            # integral should be the same, up to some tolerance
             self.integral = self.intrinsic.integral
+            tolerance = 1e-3
+            diff = numpy.absolute(self.integral - numpy.square(self.sampling)*numpy.sum(self.data))
+            if diff > tolerance:
+                warnings.warn('Map and analytic integrals are discrepant by {0} ({1} %)'.format(
+                                    diff, 100*diff/self.integral))
         except AttributeError:
             self.integral = numpy.square(self.sampling) * numpy.sum(self.data)
 

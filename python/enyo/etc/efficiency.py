@@ -160,71 +160,40 @@ class AtmosphericThroughput(Efficiency):
         super(AtmosphericThroughput, self).__init__(db[:,0], numpy.power(10, -0.4*db[:,1]*airmass))
 
 
-class ApertureEfficiency(Efficiency):
-    """
-    Compute the efficiency (extracted compared to total flux) of an
-    on-sky, circular aperture.
-
-    .. todo::
-        - Allow source distribution to be wavelength dependent
-        - Allow aperture to be a shape other than circular
-        - Use total flux from source object
-
-    Args:
-        diameter (:obj:`float`):
-            Aperture diameter in micron or arcsec.  Assumed to be micron
-            if `platescale` provided, otherwise assumed to be arcsec.
-        platescale (:obj:`float`, optional):
-            Focal-plane plate scale in mm/arcsec.
-        source (scalar-like or object, optional):
-            The *intrinsic* source surface brightness distribution.  If
-            a scalar is provided, a point source is assumed.  This is
-            passed as the argument `intrinsic` to
-            :class:`enyo.etc.onskysource.OnSkySource`; see there for
-            further information.
-        seeing (scalar-like, optional):
-            FWHM of a Gaussian seeing disk.
-        pointing_offset (array-like, optional):
-            x,y offset of the pointing from the center of the object.
-
-    """
-    def __init__(self, wave, diameter, platescale=None, seeing=None, intrinsic=None,
-                 pointing_offset=None):
-        # Set the aperture dimater
-        self.diameter = diameter if platescale is None else diameter*1e-3*platescale
-        # Get the on-sky source distribution
-        self.source = source.OnSkySource(seeing, intrinsic=source, offset=pointing_offset)
-        # Find the pixels of the source within the aperture
-        indx = numpy.square(self.source.x) + numpy.square(self.source.y) < numpy.square(diameter/2)
-        # Get the (scalar) efficiency of the observation
-        self.total = numpy.full_like(wave, numpy.sum(self.source.data[indx])/self.source.integral)
-        # Instantiate
-        super(ApertureEfficiency, self).__init__(wave, self.total)
-
-
 class Detector:
     """
     Define the detector statistics.
 
     .. todo:
-        - include pixel size
-        - spatial and spectral pixel scale
         - why isn't efficiency the base class for this?
+        - allow pixel and dispersion scale to be wavelength dependent
+        - set pixel size in micron; set pixel scale using telescope
+          plate scale
+        - set dispersion scale using pixel size? need grating, etc...
 
     Args:
+        pixelscale (:obj:`float`, optional):
+            The pixel scale in arcseconds per pixel.
+        dispscale (:obj:`float`, optional):
+            The dispersion scale in angstroms per pixel.
+        log (:obj:`bool`, optional):
+            The dispersion scale is in log(angstroms) per pixel.
         rn (:obj:`float`, optional):
             Read-noise in electrons.
         dark (:obj:`float`, optional):
             Dark current in electrons per second.
-        qa (:obj:`float`, :class:`Efficiency`, optional):
+        qe (:obj:`float`, :class:`Efficiency`, optional):
             Detector quantum efficiency.
     """
-    def __init__(self, rn=1., dark=0., qe=0.9):
+    def __init__(self, pixelscale=1., dispscale=1., log=False, rn=1., dark=0., qe=0.9):
+        self.pixelscale = pixelscale
+        self.dispscale = dispscale
+        self.log = log
         self.rn = rn
         self.dark = dark
         self.qe = qe
 
-    def __call__(self, wave=None):
+    def efficiency(self, wave=None):
         if isinstance(self.qe, Efficiency):
             if wave is None:
                 raise ValueError('Must provide wavelength for quantum efficiency')

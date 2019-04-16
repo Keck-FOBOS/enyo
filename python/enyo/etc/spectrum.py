@@ -49,6 +49,64 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
     return numpy.mean(dw)
 
 
+def convert_flux_density(wave, flux, density='ang'):
+    r"""
+    Convert a spectrum with flux per unit wavelength to per unit
+    frequency or vice versa.
+
+    For converting from per unit wavelength, this function returns
+    
+    .. math::
+        
+        F_{\nu} = F_{\lambda} \frac{d\lambda}{d\nu} = F_{\lambda}
+        \frac{\lambda^2}{c}.
+
+    The spectrum independent variable (`wave`) is always expected to be
+    the wavelength in angstroms.  The input/output units always expect
+    :math:`F_{\lambda}` in :math:`10^{-17}\ {\rm erg\ s}^{-1}\ {\rm
+    cm}^{-2}\ {\rm A}^{-1}` and :math:`F_{\nu}` in microjanskys
+    (:math:`10^{-29} {\rm erg\ s}^{-1}\ {\rm cm}^{-2}\ {\rm Hz}^{-1}`).
+    Beyond this, the function is ignorant of the input/output units.
+
+    E.g., if you provide the function with an input spectrum with
+    :math:`F_{\lambda}` in :math:`10^{-11}\ {\rm erg\ s}^{-1}\ {\rm
+    cm}^{-2}\ {\rm A}^{-1}`, the output will be :math:`F_{\nu}` in
+    Janskys.
+
+    Args:
+        wave (:obj:`float`, array-like):
+            The vector with the wavelengths in angstroms.
+        flux (:obj:`float`, array-like):
+            The vector with the flux density; cf. `density`.
+        density (:obj:`str`, optional):
+            The density unit of the *input* spectrum.  Must be either
+            'ang' or 'Hz'.  If the input spectrum is :math:`F_{\lambda}`
+            (`density='ang'`), the returned spectrum is :math:`F_{\nu}`.
+
+    Returns:
+        The spectrum with the converted units.
+
+    Raises:
+        ValueError:
+            Raised if the `wave` and `flux` arguments do not have the
+            same shape.
+    """
+    # Set to be at least vectors
+    _wave = numpy.atleast_1d(wave)
+    _flux = numpy.atleast_1d(flux)
+    if _wave.shape != _flux.shape:
+        raise ValueError('Wavelength and flux arrays must have the same shape.')
+    if density == 'ang':
+        # Convert Flambda to Fnu
+        fnu = _flux*numpy.square(_wave)*1e13/astropy.constants.c.to('nm/s').value
+        return fnu[0] if isinstance(flux, float) else fnu
+    if density == 'Hz':
+        # Convert Fnu to Flambda
+        flambda = _flux*astropy.constants.c.to('nm/s').value/numpy.square(_wave)/1e13
+        return flambda[0] if isinstance(flux, float) else flambda
+    raise ValueError('Density units must be either \'ang\' or \'Hz\'.')
+
+
 class Spectrum:
     r"""
     Define a spectrum.
@@ -72,12 +130,15 @@ class Spectrum:
         log (:obj:`bool`, optional):
             Spectrum is sampled in steps of log base 10.
     """
-    def __init__(self, wave, flux, resolution=None, log=False):
+    def __init__(self, wave, flux, error=None, resolution=None, log=False):
         if resolution is not None and len(flux) != len(resolution):
             raise ValueError('Resolution vector must match length of flux vector.')
         self.interpolator = interpolate.interp1d(wave, flux, assume_sorted=True)
+        self.error = error
         self.sres = resolution
         self.log = log
+        self.nu = self._frequency()
+        self.fnu = None
 
     @property
     def wave(self):
@@ -90,8 +151,15 @@ class Spectrum:
     def __getitem__(self, s):
         return self.interpolator.y[s]
 
+    def _frequency(self):
+        """Calculate the frequency in terahertz."""
+        return 10*astropy.constants.c.to('km/s').value/self.wave
+
     def interp(self, w):
-        return self.interpolator(w)
+        indx = (w > self.interpolator.x[0]) & (w < self.interpolator.x[-1])
+        sampled = numpy.zeros_like(w, dtype=float)
+        sampled[indx] = self.interpolator(w[indx])
+        return sampled
 
     @classmethod
     def from_file(cls, fitsfile, waveext='WAVE', fluxext='FLUX', resext=None):
@@ -102,36 +170,67 @@ class Spectrum:
         return cls(wave, flux, resolution=sres)
 
     def wavelength_step(self):
+        """
+        Return the wavelength step per pixel.
+        """
+        # TODO: Lazy load and then keep this?
         dw = spectral_coordinate_step(self.wave, log=self.log)
         if self.log:
             dw *= numpy.log(10.)*self.wave
         return dw
 
+    def frequency_step(self):
+        """
+        Return the frequency step per pixel in THz.
+        """
+        return 10*astropy.constants.c.to('km/s').value*self.wavelength_step()/self.wave/self.wave
+
+    def magnitude(self, band, system='AB'):
+        if system == 'AB':
+            if self.nu is None:
+                self._frequency()
+            if self.fnu is None:
+                # Flux in microJanskys
+                self.fnu = convert_flux_density(self.wave, self.flux)
+            dnu = self.frequency_step() 
+            band_weighted_mean = numpy.sum(band(self.wave)*self.fnu*dnu) \
+                                    / numpy.sum(band(self.wave)*dnu)
+            return -2.5*numpy.log10(band_weighted_mean*1e-29) - 48.6
+
+        raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
+
     def rescale_flux(self, wave, flux):
         """
         input flux should be in units of  1e-17 erg/s/cm^2/angstrom.
         """
-        self.interpolator.y *= flux/self.interp(wave)
+        scale = flux/self.interp(wave)
+        self.interpolator.y *= scale
+        if self.error is not None:
+            self.error *= scale
 
     def rescale_magnitude(self, band, new_mag, system='AB'):
-        # Get the current magnitude
-        dw = self.wavelength_step()
-        band_weighted_mean = numpy.sum(band(self.wave)*self.flux*dw) \
-                                / numpy.sum(band(self.wave)*dw)
-        band_weighted_center = numpy.sum(band(self.wave)*self.wave*self.flux*dw) \
-                                / numpy.sum(band(self.wave)*self.flux*dw)
-        # units are 1e-17 erg/s/cm^2/angstrom
+        """
+        Rescale existing magnitude to a new magnitude.
+        """
+        dmag = new_mag - self.magnitude(band, system=system)
         if system == 'AB':
-            current_mag = -2.5*numpy.log10(3.34e4*numpy.square(band_weighted_center)
-                            * 1e-17*band_weighted_mean) + 8.9
-            self.interpolator.y *= numpy.power(10, -0.4*(new_mag-current_mag))
+            scale = numpy.power(10., -dmag/2.5)
+            self.interpolator.y *= scale
+            if self.error is not None:
+                self.error *= scale
+            if self.fnu is not None:
+                self.fnu *= scale
             return
 
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
     def photon_flux(self):
-        """
-        Convert the spectrum from erg/s/cm^2/angstrom to photons/s/cm^2/angstrom
+        r"""
+        Convert the spectrum from 1e-17 erg/s/cm^2/angstrom to
+        photons/s/cm^2/angstrom
+
+        .. todo::
+            Return error as well?
         """
         ergs_per_photon = astropy.constants.h.to('erg s') * astropy.constants.c.to('angstrom/s') \
                             / (self.wave * astropy.units.angstrom)
@@ -203,6 +302,10 @@ class EmissionLineSpectrum(Spectrum):
         sigma = numpy.asarray([fwhm]).ravel()/sig2fwhm
         nlines = len(_flux)
 
+        indx = (_linewave > wave[0]) & (_linewave < wave[-1])
+        if not numpy.any(indx):
+            raise ValueError('Redshifted lines are all outside of the provided wavelength range.')
+
         # Check for consistency
         if len(_linewave) != nlines:
             raise ValueError('Number of line rest wavelengths must match number of line fluxes.')
@@ -224,7 +327,8 @@ class EmissionLineSpectrum(Spectrum):
             sigma_inst = astropy.constants.c.to('km/s').value/_resolution/sig2fwhm if log else \
                             wave/_resolution/sig2fwhm
             interp = interpolate.interp1d(wave, sigma_inst, assume_sorted=True)
-            sigma = numpy.sqrt(numpy.square(sigma) + numpy.square(interp(_linewave)))
+            sigma[indx] = numpy.sqrt(numpy.square(sigma[indx])
+                                        + numpy.square(interp(_linewave[indx])))
 
         # Convert parameters to pixel units
         _dw = spectral_coordinate_step(wave, log=log)
@@ -245,6 +349,8 @@ class EmissionLineSpectrum(Spectrum):
         spectrum = numpy.zeros(wave.size, dtype=float)
         profile = IntegratedGaussianLSF()
         for i in range(nlines):
+            if not indx[i]:
+                continue
             p = profile.parameters_from_moments(_flux[i], _linepix[i], sigma[i])
             spectrum += profile(pix, p)
 
@@ -293,4 +399,16 @@ class MaunakeaSkySpectrum(Spectrum):
         raise NotImplementedError('Spectrum for blue galaxy is fixed.')
 
 
+class ABReferenceSpectrum(Spectrum):
+    """
+    Construct a spectrum with a constant flux of 3631 Jy.
+
+    Inherits from :class:`Spectrum`, which we take to mean that the flux
+    is always in units of 1e-17 erg/s/cm^2/angstrom.
+    """
+    def __init__(self, wave, log=False):
+        norm = numpy.power(10., 29 - 48.6/2.5)  # Reference flux in microJanskys
+        fnu = numpy.full_like(wave, norm, dtype=float)
+        flambda = convert_flux_density(wave, fnu, density='Hz')
+        super(ABReferenceSpectrum, self).__init__(wave, flambda, log=log)
 
