@@ -98,11 +98,11 @@ def convert_flux_density(wave, flux, density='ang'):
         raise ValueError('Wavelength and flux arrays must have the same shape.')
     if density == 'ang':
         # Convert Flambda to Fnu
-        fnu = _flux*numpy.square(_wave)*1e13/astropy.constants.c.to('nm/s').value
+        fnu = _flux*numpy.square(_wave)*1e12/astropy.constants.c.to('angstrom/s').value
         return fnu[0] if isinstance(flux, float) else fnu
     if density == 'Hz':
         # Convert Fnu to Flambda
-        flambda = _flux*astropy.constants.c.to('nm/s').value/numpy.square(_wave)/1e13
+        flambda = _flux*astropy.constants.c.to('angstrom/s').value/numpy.square(_wave)/1e12
         return flambda[0] if isinstance(flux, float) else flambda
     raise ValueError('Density units must be either \'ang\' or \'Hz\'.')
 
@@ -118,10 +118,11 @@ class Spectrum:
         - include inverse variance
         - include mask
         - incorporate astropy units?
+        - keep track of units
 
     Args:
         wave (array-like):
-            1D wavelength data in angstroms.  Expected to be sample
+            1D wavelength data in angstroms.  Expected to be sampled
             linearly or geometrically.
         flux (array-like):
             1D flux data in 1e-17 erg/s/cm^2/angstrom.
@@ -137,6 +138,7 @@ class Spectrum:
         self.error = error
         self.sres = resolution
         self.log = log
+        # TODO: Check log against the input wavelength vector
         self.nu = self._frequency()
         self.fnu = None
 
@@ -199,14 +201,33 @@ class Spectrum:
 
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
+    def rescale(self, factor):
+        """
+        Rescale the spectrum by the provided factor.
+
+        The spectral data are modified *in-place*; nothing is
+        returned.
+
+        Args:
+            factor (scalar-like or array-like):
+                Factor to multiply the fluxes. If it's a vector, it
+                must have the same length as the existing spectrum.
+        """
+        self.interpolator.y *= factor
+        if self.error is not None:
+            # Adjust the error
+            self.error *= numpy.absolute(factor)
+        if self.fnu is not None:
+            # Adjust the flux density per Hz
+            self.fnu *= factor
+
     def rescale_flux(self, wave, flux):
         """
-        input flux should be in units of  1e-17 erg/s/cm^2/angstrom.
+        Rescale the spectrum to be specifically the flux value at the
+        provided wavelength. The input flux should be in units of
+        1e-17 erg/s/cm^2/angstrom.
         """
-        scale = flux/self.interp(wave)
-        self.interpolator.y *= scale
-        if self.error is not None:
-            self.error *= scale
+        return self.rescale(flux/self.interp(wave))
 
     def rescale_magnitude(self, band, new_mag, system='AB'):
         """
@@ -214,27 +235,20 @@ class Spectrum:
         """
         dmag = new_mag - self.magnitude(band, system=system)
         if system == 'AB':
-            scale = numpy.power(10., -dmag/2.5)
-            self.interpolator.y *= scale
-            if self.error is not None:
-                self.error *= scale
-            if self.fnu is not None:
-                self.fnu *= scale
-            return
-
+            return self.rescale(numpy.power(10., -dmag/2.5))
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
     def photon_flux(self):
         r"""
         Convert the spectrum from 1e-17 erg/s/cm^2/angstrom to
-        photons/s/cm^2/angstrom
+        photons/s/cm^2/angstrom.
 
-        .. todo::
-            Return error as well?
+        The spectral data are modified *in-place*; nothing is
+        returned.
         """
         ergs_per_photon = astropy.constants.h.to('erg s') * astropy.constants.c.to('angstrom/s') \
                             / (self.wave * astropy.units.angstrom)
-        return 1e-17*self.interpolator.y / ergs_per_photon.value
+        return self.rescale(1e-17 / ergs_per_photon.value)
 
     def show(self):
         pyplot.plot(self.wave, self.flux)
@@ -396,7 +410,7 @@ class MaunakeaSkySpectrum(Spectrum):
 
     @classmethod
     def from_file(cls):
-        raise NotImplementedError('Spectrum for blue galaxy is fixed.')
+        raise NotImplementedError('Maunakea sky spectrum is fixed.')
 
 
 class ABReferenceSpectrum(Spectrum):

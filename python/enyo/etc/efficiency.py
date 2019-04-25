@@ -11,6 +11,8 @@ from matplotlib import pyplot
 
 from scipy import interpolate
 
+from astropy import units
+
 from . import source
 
 class Efficiency:
@@ -26,7 +28,7 @@ class Efficiency:
 
     Args:
         wave (array-like):
-            1D array with wavelengths.
+            1D array with wavelengths in angstroms.
         eta (array-like):
             1D array with efficiency data.
     """
@@ -35,12 +37,13 @@ class Efficiency:
                                                  fill_value=0.0)
     
     @classmethod
-    def from_file(cls, data_file):
+    def from_file(cls, data_file, wave_units='angstrom'):
         """
         Read from an ascii file
         """
         db = numpy.genfromtxt(data_file)
-        return cls(db[:,0], db[:,1])
+        u = units.Unit(wave_units)
+        return cls(db[:,0]*u.to('angstrom'), db[:,1])
 
     def __call__(self, wave):
         return self.interpolator(wave)
@@ -55,6 +58,22 @@ class Efficiency:
     @property
     def eta(self):
         return self.interpolator.y
+
+
+class FiberThroughput(Efficiency):
+    def __init__(self, fiber='polymicro'):
+        data_file = FiberThroughput.select_data_file(fiber)
+        if not os.path.isfile(data_file):
+            raise FileNotFoundError('No file: {0}'.format(data_file))
+        db = numpy.genfromtxt(data_file)
+        super(FiberThroughput, self).__init__(db[:,0], db[:,1])
+
+    @staticmethod
+    def select_data_file(fiber):
+        if fiber == 'polymicro':
+            return os.path.join(os.environ['ENYO_DIR'], 'data', 'efficiency', 'fibers',
+                                'polymicro.db')
+        raise NotImplementedError('Unknown fiber type: {0}'.format(fiber))
 
 
 class FilterResponse(Efficiency):
@@ -154,7 +173,7 @@ class SystemThroughput(Efficiency):
 class AtmosphericThroughput(Efficiency):
     def __init__(self, airmass=1.0, location='maunakea'):
         if location != 'maunakea':
-            raise NotImplementedError('Extiction unknown at {0}.'.format(location))
+            raise NotImplementedError('Extinction unknown at {0}.'.format(location))
         db = numpy.genfromtxt(os.path.join(os.environ['ENYO_DIR'], 'data/sky',
                                'mauna_kea_extinction.db'))
         super(AtmosphericThroughput, self).__init__(db[:,0], numpy.power(10, -0.4*db[:,1]*airmass))

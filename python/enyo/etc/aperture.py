@@ -17,6 +17,10 @@ class Aperture:
     """
     Abstract class for a general aperture shape.
 
+    .. todo:
+        - limit the calculation of the polygon overlap to where the
+        corners of the grid cells cross the boundary of the aperture.
+
     Args:
         shape (shapely.geometry.base.BaseGeometry):
             A shape object from the Shapely python package.

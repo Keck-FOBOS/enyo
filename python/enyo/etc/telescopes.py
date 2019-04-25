@@ -17,15 +17,18 @@ class Telescope:
             Earth coordinate with the location of the telescope in degrees.
         elevation (scalar-like):
             Earth elevation above sea level of the telescope in meters.
+        fratio (scalar-like):
+            F-ratio or beam speed (focal length over diameter) for
+            the telescope focal plane.
         platescale (scalar-like):
             Telescope platescale in mm/arcsec.
-        diameter (scalar-like, optional):
-            Telescope diameter in meters.  If provided, used to set the
-            telescope area.  Must be provided if `area` is not.
         area (scalar-like, optional):
             The true or effective area of the telescope aperture in
             square centimeters.  If not provided, calculated using
             `diameter`.  Must be provided if `diameter` is not.
+        diameter (scalar-like, optional):
+            Telescope diameter in meters.  If provided, used to set the
+            telescope area.  Must be provided if `area` is not.
         obstruction (scalar-like, optional):
             The unitless fraction of the total telescope area lost due
             to the central obstruction.  If provided, the telescope area
@@ -38,11 +41,12 @@ class Telescope:
             Raised if both or neither of `diameter` or `area` are
             provoded.
     """
-    def __init__(self, longitude, latitude, elevation, platescale, diameter=None, area=None,
-                 obstruction=None):
+    def __init__(self, longitude, latitude, elevation, fratio, platescale, area=None,
+                 diameter=None, obstruction=None):
         self.longitude = longitude
         self.latitude = latitude
         self.elevation = elevation
+        self.fratio = fratio
         self.platescale = platescale
 
         # If area is provided, use it directly:
@@ -66,7 +70,20 @@ class Telescope:
 
 class KeckTelescope(Telescope):
     def __init__(self):
-        super(KeckTelescope, self).__init__(155.47833, 19.82833, 4160.0, 1.379, area=723674.)
+        # This assumes the f/15 secondary, specifically for the platescale
+        super(KeckTelescope, self).__init__(155.47833, 19.82833, 4160.0, 15., 0.725, area=723674.)
+
+
+class SDSSTelescope(Telescope):
+    def __init__(self):
+        super(SDSSTelescope, self).__init__(105.82028, 32.78028, 2788.0, 5., 0.06048, diameter=2.5,
+                                            obstruction=0.286)
+
+
+class APFTelescope(Telescope):
+    def __init__(self):
+        super(APFTelescope, self).__init__(121.64278, 37.34139, 1283.0, 15., 0.17452,
+                                           diameter=2.41, obstruction=0.02)
 
 
 class Observation:

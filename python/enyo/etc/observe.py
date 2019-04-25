@@ -215,7 +215,7 @@ class Observation:
         # Draw from a Gaussian distribution for the read noise
         read_draw = numpy.random.normal(scale=numpy.sqrt(self.read_variance))
         return spectrum.Spectrum(self.wave,
-                                 self.total_flux - self.sky_flux,
+                                 self.total_flux - self.sky_flux + shot_draw + read_draw,
                                  error=numpy.sqrt(self.shot_variance + self.read_variance),
                                  log=self.detector.log)
 
