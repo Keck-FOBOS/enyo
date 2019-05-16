@@ -71,15 +71,19 @@ Telescope:
 import os
 import numpy
 
+from scipy import signal
+
 from matplotlib import pyplot
 
-from . import source, efficiency, telescopes, spectrum, extract, aperture
+from . import source, efficiency, telescopes, spectrum, extract, aperture, util
 
 class Observation:
     """
-    Observe a source
+    Observation of the sky with or without a non-terrestrial source.
 
     Args:
+
+
         magnitude (scalar-like):
             Apparent magnitude of the source.
         exposure_time (scalar-like):
@@ -136,10 +140,27 @@ class Observation:
         normalizing_band (:obj:`str`, optional):
             Rest-frame broad-band filter in which the magnitude or
             surface brightness is defined.
+
+
+    if atmospheric throughput is not provided, assume Maunakea curve
+    if airmass is None, use default defined by atmospheric throughput class/instance
+
+    if source or source distribution are None (must provide both), assume a sky-only exposure
+
+    if sky spectrum is None, assume dark Maunakea sky
+
+    if sky distribution is None, assume constant
+
+    if extraction is None, provide 2d result; otherwise return 1D extraction
+
     """
-    def __init__(self, onsky_source_distribution, source_spectrum, sky_spectrum,
-                 atmospheric_throughput, telescope, focal_plane_aperture, system_throughput,
-                 detector, exposure_time, extraction):
+    def __init__(self, spec_aperture, spectrograph, exposure_time, atmospheric_throughput=None,
+                 airmass=None, onsky_source_distribution=None, source_spectrum=None,
+                 sky_spectrum=None, sky_distribution=None, extraction=None): 
+
+
+#                  system_throughput,
+#                 detector, exposure_time, extraction):
 
 #        # Rescale source spectrum to the input magnitude or surface
 #        # brightness
@@ -223,4 +244,97 @@ class Observation:
         return spectrum.Spectrum(self.wave,
                                  (self.total_flux - self.sky_flux)
                                         / numpy.sqrt(self.shot_variance + self.read_variance))
+
+
+def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, onsky_source=None,
+                        scramble=False):
+    """
+    Generate a monochromatic image of the sky, with or with out a
+    non-terrestrial source, taken by a spectrograph through an
+    aperture.
+
+    .. warning::
+        - May resample the `source` and `spec_kernel` maps.
+
+    .. todo::
+        - Add effect of differential atmospheric refraction
+
+    Args:
+        sky (:class:`enyo.etc.source.OnSkySource`):
+            Sky flux distribution.
+        spec_aperture (:class:`enyo.etc.aperture.Aperture`):
+            Spectrograph aperture. Aperture is expected to be
+            oriented with the dispersion along the first axis (e.g.,
+            the slit width is along the abcissa).
+        spec_kernel (:class:`enyo.etc.kernel.SpectrographGaussianKernel`):
+            Convolution kernel describing the point-spread function
+            of the spectrograph.
+        platescale (:obj:`float`):
+            Platescale in mm/arcsec at the detector
+        pixelsize (:obj:`float`):
+            Size of the detector pixels in mm.
+        onsky_source (:class:`enyo.etc.source.OnSkySource`, optional):
+            On-sky distribution of the source flux. If None, only sky
+            is observed through the aperture.
+        scramble (:obj:`bool`, optional):
+            Fully scramble the source light passing through the
+            aperture. This should be False for slit observations. For
+            fiber observations, this should be True and makes the
+            nominal assumption that the focal plane incident on the
+            fiber face is perfectly scrambled.
+    """
+    # Check input
+    if onsky_source is not None:
+        if onsky_source.sampling is None or onsky_source.size is None:
+            warnings.warn('Source was not provided with an initial map sampling; doing so now '
+                          'with default sampling and size.')
+            onsky_source.make_map()
+
+    # Detector pixel scale
+    pixelscale = pixelsize/platescale
+
+    # Assume the sampling of the source is provided with the maximum
+    # allowed pixel size. Determine a pixel size that is no more than
+    # this, up to an integer number of detector pixels. Use an integer
+    # number specifically so that the result of the kernel convolution
+    # can be simply rebinned to match the detector pixel size.
+    # `sampling` is in arcsec per pixel
+    sampling = pixelscale if onsky_source is None else min(onsky_source.sampling, pixelscale)
+    oversample = int(pixelscale/sampling)+1 if sampling < pixelscale else 1
+    sampling /= oversample
+
+    # Assume the size of the image properly samples the source.
+    # Determine a map size that at least encompasses the input source
+    # and the input aperture. The factor of 1.5 is ad hoc; could likely
+    # be lower. `size` is in arcsecA
+    dx, dy = 1.5*numpy.diff(numpy.asarray(spec_aperture.bounds).reshape(2,-1), axis=0).ravel()
+    size = max(dx,dy) if onsky_source is None else max(onsky_source.size, dx, dy)
+
+    # TODO: Below alters `source` and `spec_kernel`. Should maybe
+    # instead save the old sampling and size and then resample back to
+    # the input before returning.
+
+    # Resample the distribution maps. Classes OnSkySource and Aperture
+    # use arcsecond units.
+    if onsky_source is not None:
+        onsky_source.make_map(sampling=sampling, size=size)
+    sky.make_map(sampling=sampling, size=size)
+    ap_img = spec_aperture.response(sky.x, sky.y)
+
+    # However, SpectrographGaussianKernel uses mm, so we need to
+    # convert sampling from arcsec/pixel to mm/pixel using the
+    # platescale.
+    spec_kernel.resample(pixelscale=platescale*sampling)
+
+    # Construct the image. Note that scrambling simply scales the
+    # aperture image by the flux that enters it; otherwise, the source
+    # image is just attenuated by the aperture response map.
+    source_img = sky.data if onsky_source is None else onsky_source.data + sky.data
+    input_img = ap_img*numpy.sum(source_img*ap_img)/numpy.sum(ap_img) if scramble \
+                        else source_img*ap_img
+
+    # Convolve it with the spectrograph imaging kernel
+    mono_img = signal.fftconvolve(input_img, spec_kernel.array, mode='same')
+    # Return the image, downsampling if necessary
+    return util.boxcar_average(mono_img, oversample) if oversample > 1 else mono_img
 

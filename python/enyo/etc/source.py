@@ -14,7 +14,8 @@ from astropy.modeling import functional_models
 # numpy.ndarray?
 class Source:
     """
-    This is an abstract class an cannot be instantiated on it's own!
+    This is an abstract class and should not be instantiated on it's
+    own!
 
     Attributes:
         x (vector):
@@ -64,9 +65,17 @@ class Source:
         elif size is not None:
             self.size = size
 
+        # Set the number of pixels that spans the full size requested
         pixsize = numpy.ceil(self.size/self.sampling).astype(int)
+        # Force the pixel size to be odd
         if pixsize % 2 == 0:
             pixsize += 1
+        # Adjust the size to be an integer number of pixels
+        _size = pixsize*self.sampling
+        if _size - self.size > 0.1*self.sampling:
+            warnings.warn('Size reset to an integer number of pixels: '
+                          ' {0} -> {1} arcsec'.format(self.size, _size))
+        self.size = _size
         self.y = (pixsize-1)*numpy.linspace(-0.5,0.5,pixsize)*self.sampling
         self.x = self.y.copy()[::-1]
 
@@ -83,6 +92,61 @@ class Source:
     @property
     def shape(self):
         return () if self.data is None else self.data.shape
+
+
+class OnSkyConstant(Source):
+    """
+    An on-sky constant surface brightness.
+
+    Args:
+        surfbrightness (scalar-like):
+            The constant surface brightness for the source in linear
+            flux units per square arcsecond.
+        sampling (scalar-like, optional):
+            Sampling of a generated map in arcseconds per pixel.
+            Default is set by :func:`minimum_sampling`.
+        size (scalar-like, optional):
+            Size of the image to generate of the distribution in
+            *arceconds* along one of the axes.  The map is square.
+            Default is defined by :func:`minimum_size`.
+    """
+    def __init__(self, surfbrightness, sampling=None, size=None):
+
+        # Define internals
+        self.surfbrightness = float(surfbrightness)
+        # Instantiate the functional_models.Gaussian2D object
+        super(OnSkyConstant, self).__init__()
+
+        # Set the map sampling and size
+        self.sampling = sampling
+        self.size = size
+
+        # Set the map if requested
+        if sampling is not None or size is not None:
+            self.make_map()
+
+    def minimum_sampling(self):
+        r"""
+        Return the minimum sampling in arcseconds per pixels.
+        Currently just set to 1.
+        """
+        # TODO: Allow `Source` to understand when this returns None?
+        return 1.
+
+    def minimum_size(self):
+        r"""
+        The minimum size that should be used for the distribution map in
+        arcseconds.  Currently just set to 3.
+        """
+        # TODO: Allow `Source` to understand when this returns None?
+        return 3.
+
+    def __call__(self, x, y):
+        """
+        Return the surface brightness at a given location.
+        """
+        return numpy.full_like(x, self.surfbrightness, dtype=float) \
+                    if isinstance(x, numpy.ndarray) else self.surfbrightness
 
 
 class OnSkyGaussian(functional_models.Gaussian2D, Source):
@@ -143,7 +207,7 @@ class OnSkyGaussian(functional_models.Gaussian2D, Source):
         sig2fwhm = numpy.sqrt(8*numpy.log(2))
         major_sigma = self.fwhm/sig2fwhm
         minor_sigma = major_sigma * (1-self.ellipticity)
-        return 2*numpy.pi*major_sigma*minor_sigma
+        return self.amplitude*2*numpy.pi*major_sigma*minor_sigma
 
     def minimum_sampling(self):
         r"""

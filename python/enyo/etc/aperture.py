@@ -184,6 +184,10 @@ class Aperture:
     def area(self):
         return self.shape.area
 
+    @property
+    def bounds(self):
+        return self.shape.bounds
+
     def integrate_over_source(self, source, response_method='fractional', sampling=None,
                               size=None):
         """
@@ -340,6 +344,9 @@ class SlitAperture(Aperture):
             Slit width along the unrotated x axis.
         length (scalar-like):
             Slit length along the unrotated y axis.
+        rotation (scalar-like):
+            Cartesian rotation of the slit in degrees.
+
     Attributes:
         center (list):
             Center x and y coordinate.
@@ -356,6 +363,7 @@ class SlitAperture(Aperture):
         y = numpy.array([-length/2, length/2])+cy
         square = asPolygon(numpy.append(numpy.roll(numpy.repeat(x,2),-1),
                                         numpy.repeat(y,2)).reshape(2,4).T)
+        # rotate() function is provided by shapely.affinity package
         super(SlitAperture, self).__init__(rotate(square, rotation))
 
 

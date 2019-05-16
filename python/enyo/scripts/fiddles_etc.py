@@ -6,7 +6,7 @@ from scipy import interpolate
 
 from matplotlib import pyplot, ticker, rc, colors, cm, colorbar, image, patches
 
-from enyo.etc import source, telescopes, aperture, spectrum, efficiency
+from enyo.etc import source, telescopes, aperture, spectrum, efficiency, util
 
 def test_mag():
     wave = numpy.linspace(3000., 10000., num=7001)
@@ -241,19 +241,8 @@ def fiddles_model(mag, telescope, seeing, exposure_time, airmass=1.0, fiddles_fr
 
     # Down-sample to the detector size
     if upsample > 1:
-        source_fiber_img = numpy.add.reduceat(source_fiber_img,
-                                              numpy.arange(0,int(size/sampling),upsample),
-                                              axis=0)/upsample
-        source_fiber_img = numpy.add.reduceat(source_fiber_img,
-                                              numpy.arange(0,int(size/sampling),upsample),
-                                              axis=1)/upsample
-
-        fiber_response = numpy.add.reduceat(fiber_response,
-                                            numpy.arange(0,int(size/sampling),upsample),
-                                            axis=0)/upsample
-        fiber_response = numpy.add.reduceat(fiber_response,
-                                            numpy.arange(0,int(size/sampling),upsample),
-                                            axis=1)/upsample
+        source_fiber_img = util.boxcar_average(source_fiber_img, upscale)
+        fiber_response = util.boxcar_average(fiber_response, upscale)
 
     # Scale the spectra to be erg/angstrom (per arcsec^2 for sky)
     print('Exposure time: {0:.1f} (s)'.format(exposure_time))

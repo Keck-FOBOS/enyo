@@ -3,8 +3,14 @@
 """
 Define telesope parameters
 """
-
+import os
 import numpy
+
+from . import efficiency
+
+# TODO: Define a `TelescopePort` or `TelescopeFocalPlane` class that
+# holds the f-ratio, platescale, and throughput information, and allow
+# each `Telescope` definition to have multiple focal planes?
 
 class Telescope:
     """
@@ -22,6 +28,10 @@ class Telescope:
             the telescope focal plane.
         platescale (scalar-like):
             Telescope platescale in mm/arcsec.
+        throughput (:obj:`float`, :class:`enyo.etc.efficiency.Efficiency`,
+             :class:`enyo.etc.efficiency.CombinedEfficiency`, optional):
+            The throughput of the telescope from the top of the
+            telescope to the focal plane.
         area (scalar-like, optional):
             The true or effective area of the telescope aperture in
             square centimeters.  If not provided, calculated using
@@ -41,13 +51,14 @@ class Telescope:
             Raised if both or neither of `diameter` or `area` are
             provoded.
     """
-    def __init__(self, longitude, latitude, elevation, fratio, platescale, area=None,
-                 diameter=None, obstruction=None):
+    def __init__(self, longitude, latitude, elevation, fratio, platescale, throughput=1.,
+                 area=None, diameter=None, obstruction=None):
         self.longitude = longitude
         self.latitude = latitude
         self.elevation = elevation
         self.fratio = fratio
         self.platescale = platescale
+        self._throughput = throughput
 
         # If area is provided, use it directly:
         if area is not None:
@@ -67,11 +78,28 @@ class Telescope:
         if obstruction is not None:
             self.area *= (1-obstruction)
 
+    def throughput(self, wave=None):
+        if not isinstance(self._throughput, efficiency.Efficiency):
+            # Just a float that is independent of wavelength
+            return self._throughput
+        if wave is None:
+            raise ValueError('Throughput is wavelength dependent; must specify `wave`.')
+        return self._throughput(wave)
+
 
 class KeckTelescope(Telescope):
     def __init__(self):
-        # This assumes the f/15 secondary, specifically for the platescale
-        super(KeckTelescope, self).__init__(155.47833, 19.82833, 4160.0, 15., 0.725, area=723674.)
+        # This assumes the f/15 secondary
+        fratio = 15
+        platescale = 0.725
+        # Assumes the Nasymth port for the throughput; three
+        # reflections off an aluminum coating.
+        eta_file = os.path.join(os.environ['ENYO_DIR'], 'data', 'efficiency', 'aluminum.db')
+        single_reflection = efficiency.Efficiency.from_file(eta_file)
+        throughput = efficiency.CombinedEfficiency(dict([(key,single_reflection)
+                                                         for key in ['m1', 'm2', 'm3']]))
+        super(KeckTelescope, self).__init__(155.47833, 19.82833, 4160.0, fratio, platescale,
+                                            throughput=throughput, area=723674.)
 
 
 class SDSSTelescope(Telescope):
@@ -84,6 +112,19 @@ class APFTelescope(Telescope):
     def __init__(self):
         super(APFTelescope, self).__init__(121.64278, 37.34139, 1283.0, 15., 0.17452,
                                            diameter=2.41, obstruction=0.02)
+
+
+class TMTTelescope(Telescope):
+    def __init__(self):
+        # Assumes the Nasymth port for the throughput; three
+        # reflections off an aluminum coating.
+        eta_file = os.path.join(os.environ['ENYO_DIR'], 'data', 'efficiency', 'aluminum.db')
+        single_reflection = efficiency.Efficiency.from_file(eta_file)
+        throughput = efficiency.CombinedEfficiency(dict([(key,single_reflection)
+                                                         for key in ['m1', 'm2', 'm3']]))
+        # TODO: These numbers are all temporary
+        super(TMTTelescope, self).__init__(155.47833, 19.82833, 4160.0, 15., 2.183,
+                                           throughput=throughput, diameter=30, obstruction=0.1)
 
 
 class Observation:

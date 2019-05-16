@@ -158,6 +158,10 @@ class Spectrum:
         return 10*astropy.constants.c.to('km/s').value/self.wave
 
     def interp(self, w):
+        if not isinstance(w, numpy.ndarray) and w > self.interpolator.x[0] \
+                and w < self.interpolator.x[-1]:
+            return self.interpolator(w)
+
         indx = (w > self.interpolator.x[0]) & (w < self.interpolator.x[-1])
         sampled = numpy.zeros_like(w, dtype=float)
         sampled[indx] = self.interpolator(w[indx])
