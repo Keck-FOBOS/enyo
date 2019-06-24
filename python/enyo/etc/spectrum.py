@@ -144,13 +144,22 @@ class Spectrum:
 
     @property
     def wave(self):
+        """
+        The wavelength data vector.
+        """
         return self.interpolator.x
 
     @property
     def flux(self):
+        """
+        The flux data vector.
+        """
         return self.interpolator.y
 
     def __getitem__(self, s):
+        """
+        Access the flux data directly via slicing.
+        """
         return self.interpolator.y[s]
 
     def _frequency(self):
@@ -158,6 +167,14 @@ class Spectrum:
         return 10*astropy.constants.c.to('km/s').value/self.wave
 
     def interp(self, w):
+        """
+        Linearly interpolate the flux at a provided wavelength.
+
+        Args:
+            w (:obj:`float`, `numpy.ndarray`_):
+                Wavelength in angstroms. Can be a single wavelength
+                or a wavelength array.
+        """
         if not isinstance(w, numpy.ndarray) and w > self.interpolator.x[0] \
                 and w < self.interpolator.x[-1]:
             return self.interpolator(w)
@@ -169,6 +186,9 @@ class Spectrum:
 
     @classmethod
     def from_file(cls, fitsfile, waveext='WAVE', fluxext='FLUX', resext=None):
+        """
+        Construct the spectrum using a fits file.
+        """
         hdu = fits.open(fitsfile)
         wave = hdu[waveext].data
         flux = hdu[fluxext].data
@@ -192,6 +212,9 @@ class Spectrum:
         return 10*astropy.constants.c.to('km/s').value*self.wavelength_step()/self.wave/self.wave
 
     def magnitude(self, band, system='AB'):
+        """
+        Calculate the magnitude of the object in the specified band.
+        """
         if system == 'AB':
             if self.nu is None:
                 self._frequency()
@@ -235,7 +258,7 @@ class Spectrum:
 
     def rescale_magnitude(self, band, new_mag, system='AB'):
         """
-        Rescale existing magnitude to a new magnitude.
+        Rescale the spectrum to an input magnitude.
         """
         dmag = new_mag - self.magnitude(band, system=system)
         if system == 'AB':
