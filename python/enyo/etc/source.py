@@ -93,6 +93,30 @@ class Source:
     def shape(self):
         return () if self.data is None else self.data.shape
 
+    def reset_map(self):
+        """
+        Reset mapping attributes for a fresh determination of the
+        sampling, size, and surface-brightness map. This is mainly
+        used for resetting the internals when using the default
+        sampling and size to set the map. To reconstruct the map
+        after calling this method, run :func:`make_map`.  This::
+
+            self.reset_map()
+            self.make_map()
+
+        is equivalent to this::
+
+            self.make_map(sampling=self.minimum_sampling(), size=self.minimum_size())
+
+        """
+        self.x = None
+        self.X = None
+        self.y = None
+        self.Y = None
+        self.data = None
+        self.sampling = None
+        self.size = None 
+
 
 class OnSkyConstant(Source):
     """

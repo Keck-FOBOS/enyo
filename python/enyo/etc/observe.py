@@ -67,8 +67,8 @@ Telescope:
     - central obstruction
 
 """
-
 import os
+import warnings
 import numpy
 
 from scipy import signal
@@ -82,8 +82,6 @@ class Observation:
     Observation of the sky with or without a non-terrestrial source.
 
     Args:
-
-
         magnitude (scalar-like):
             Apparent magnitude of the source.
         exposure_time (scalar-like):
@@ -145,11 +143,10 @@ class Observation:
     if atmospheric throughput is not provided, assume Maunakea curve
     if airmass is None, use default defined by atmospheric throughput class/instance
 
-    if source or source distribution are None (must provide both), assume a sky-only exposure
-
     if sky spectrum is None, assume dark Maunakea sky
-
     if sky distribution is None, assume constant
+
+    if source or source distribution are None (must provide both), assume a sky-only exposure
 
     if extraction is None, provide 2d result; otherwise return 1D extraction
 
@@ -157,7 +154,6 @@ class Observation:
     def __init__(self, spec_aperture, spectrograph, exposure_time, atmospheric_throughput=None,
                  airmass=None, onsky_source_distribution=None, source_spectrum=None,
                  sky_spectrum=None, sky_distribution=None, extraction=None): 
-
 
 #                  system_throughput,
 #                 detector, exposure_time, extraction):
@@ -258,6 +254,7 @@ def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, 
 
     .. todo::
         - Add effect of differential atmospheric refraction
+        - Allow a force map size and pixel sampling
 
     Args:
         sky (:class:`enyo.etc.source.OnSkySource`):

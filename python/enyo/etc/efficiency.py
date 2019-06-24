@@ -70,7 +70,7 @@ class Efficiency:
             raise FileNotFoundError('File does not exist: {0}'.format(data_file))
         db = numpy.genfromtxt(data_file)
         u = units.Unit(wave_units)
-        return cls(db[:,0]*u.to('angstrom'), db[:,1])
+        return cls(db[:,1], wave=db[:,0]*u.to('angstrom'))
 
     def __call__(self, wave):
         _wave = numpy.atleast_1d(wave)
@@ -233,13 +233,13 @@ class SpectrographThroughput(CombinedEfficiency):
     Define the system throughput from the telescope focal plane to the detector.
     """
     def __init__(self, wave=None, coupling=None, fibers=None, grating=None, camera=None,
-                 detector_qe=None, other=None):
-        args, _, _, values = inspect.getargvalues(inspect.currentframe())
-        # TODO: Only efficiencies that are not None, or set None values
-        # to unity efficiency?
-        indx = [v is None for v in list(values.items())[2:]]
-        efficiencies = dict([(k,values[k]) for k in args[2:][indx]])
-        super(SpectrographThroughput, self).__init__(efficiences, wave=wave)
+                 detector=None, other=None):
+        values = inspect.getargvalues(inspect.currentframe())
+        keys = numpy.array(values.args[1:])
+        objects = numpy.array([values.locals[key] for key in keys])
+        indx = numpy.array([o is not None for o in objects])
+        efficiencies = dict([(k,o) for k,o in zip(keys[indx], objects[indx])])
+        super(SpectrographThroughput, self).__init__(efficiencies, wave=wave)
 
 
 class SystemThroughput(CombinedEfficiency):

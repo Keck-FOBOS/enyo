@@ -63,6 +63,7 @@ class SpectrographArm:
         """
         Take an observation through an aperture.
         """
+        pass
 
 
 class TMTWFOSBlue(SpectrographArm):
