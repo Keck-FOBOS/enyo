@@ -67,12 +67,12 @@ class SpectrographArm:
 
 
 class TMTWFOSBlue(SpectrographArm):
-    def __init__(self, setting='lowres', telescope=None):
+    def __init__(self, setting='lowres'):
         if setting not in TMTWFOSBlue.valid_settings():
             raise ValueError('Setting {0} not known.'.format(setting))
 
-        if telescope is None:
-            telescope = telescopes.TMTTelescope()
+        # Setup the telescope
+        telescope = telescopes.TMTTelescope()
         # Plate-scale in mm/arcsec assuming the camera fratio is 2
         platescale = telescope.platescale * 2 / telescope.fratio
         # Assume camera yields 0.2 arcsec FWHM in both dimensions
@@ -105,12 +105,12 @@ class TMTWFOSBlue(SpectrographArm):
 
 
 class TMTWFOSRed(SpectrographArm):
-    def __init__(self, setting='lowres', telescope=None):
+    def __init__(self, setting='lowres'):
         if setting not in TMTWFOSRed.valid_settings():
             raise ValueError('Setting {0} not known.'.format(setting))
 
-        if telescope is None:
-            telescope = telescopes.TMTTelescope()
+        # Setup the telescope
+        telescope = telescopes.TMTTelescope()
         # Plate-scale in mm/arcsec assuming the camera fratio is 2
         platescale = telescope.platescale * 2 / telescope.fratio
         # Assume camera yields 0.2 arcsec FWHM in both dimensions
@@ -150,8 +150,7 @@ class TMTWFOS:  #(MultiArmSpectrograph)
     def __init__(self, setting='lowres'):
         self.telescope = telescopes.TMTTelescope()
         # TODO: Allow settings to be different for each arm.
-        self.arms = {'blue': TMTWFOSBlue(setting=setting, telescope=self.telescope),
-                      'red': TMTWFOSRed(setting=setting, telescope=self.telescope)}
+        self.arms = {'blue': TMTWFOSBlue(setting=setting), 'red': TMTWFOSRed(setting=setting)}
 
     def monochromatic_image(self, sky, spec_aperture, onsky_source=None, arm=None):
         """
