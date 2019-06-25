@@ -55,10 +55,10 @@ class Detector(Efficiency):
         else:
             super(Detector, self).__init__(qe.eta, wave=qe.wave)
 
-    def focalplane2pixel(self, x, y):
-        """
-        Convert a focal-plane position in mm to the detector pixel
-        number.
+#    def focalplane2pixel(self, x, y):
+#        """
+#        Convert a focal-plane position in mm to the detector pixel
+#        number.
 
 
 # TODO: Define detector array
