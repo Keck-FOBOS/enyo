@@ -16,16 +16,16 @@ VERSION = '0.1.0dev'
 RELEASE = 'dev' not in VERSION
 MINIMUM_PYTHON_VERSION = '3.5'
 
-def get_data_files():
-    """Generate the list of data files."""
-    data_files = []
-    data_roots = [ 'data' ]
-    for root in data_roots:
-        for path, directories, files in os.walk(root):
-            for f in files:
-                data_path = '/'.join(path.split('/')[1:])
-                data_files.append(os.path.join(data_path, f))
-    return data_files
+#def get_data_files():
+#    """Generate the list of data files."""
+#    data_files = []
+#    data_roots = [ 'data' ]
+#    for root in data_roots:
+#        for path, directories, files in os.walk(root):
+#            for f in files:
+#                data_path = '/'.join(path.split('/')[1:])
+#                data_files.append(os.path.join(data_path, f))
+#    return data_files
 
 
 def get_scripts():
@@ -46,7 +46,8 @@ def get_requirements():
     return install_requires
 
 
-def run_setup(data_files, scripts, packages, install_requires):
+#def run_setup(data_files, scripts, packages, install_requires):
+def run_setup(scripts, packages, install_requires):
 
     setup(name=NAME,
           version=VERSION,
@@ -60,7 +61,7 @@ def run_setup(data_files, scripts, packages, install_requires):
           python_requires='>='+MINIMUM_PYTHON_VERSION,
           packages=packages,
           package_dir={'': 'python'},
-          package_data={'': data_files},
+#          package_data={'': data_files},
           include_package_data=True,
           install_requires=install_requires,
           scripts=scripts,
@@ -108,7 +109,7 @@ if __name__ == '__main__':
 #    warnings.formatwarning = short_warning
 
     # Compile the data files to include
-    data_files = get_data_files()
+#    data_files = get_data_files()
 
     # Compile the scripts in the bin/ directory
     scripts = get_scripts()
@@ -120,7 +121,8 @@ if __name__ == '__main__':
     install_requires = get_requirements()
 
     # Run setup from setuptools
-    run_setup(data_files, scripts, packages, install_requires)
+#    run_setup(data_files, scripts, packages, install_requires)
+    run_setup(scripts, packages, install_requires)
 
 #    # Check if the environmental variables are found and warn the user
 #    # of their defaults
