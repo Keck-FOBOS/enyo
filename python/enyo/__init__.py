@@ -12,8 +12,9 @@ __copyright__ = '(c) 2018, Kyle B. Westfall'
 
 def enyo_source_dir():
     """Return the root path to the DAP source directory."""
-    dirlist = os.path.dirname(os.path.abspath(__file__)).split('/')[:-2]
-    return os.path.join(os.sep, *dirlist) if dirlist[0] == '' else os.path.join(*dirlist)
+    import pkg_resources
+    data_dir = pkg_resources.resource_filename('enyo', 'data')
+    return os.path.split(data_dir) [0]
 
 os.environ['ENYO_DIR'] = enyo_source_dir()
 
