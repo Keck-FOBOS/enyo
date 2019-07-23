@@ -9,9 +9,11 @@ import numpy as np
 import os
 import math
 import warnings
+import os.path
 import matplotlib.pyplot as plt
 from matplotlib import colors, cm, figure
 from scipy import interpolate
+from matplotlib import rc
 
 #external functions   
 def max_thin_step(grid):
@@ -99,30 +101,29 @@ class FocalPlane2Detector:
             set up interpolator
         """    
         #f, c, & xi for NDInterp and transpose (.T)
-        f = np.array([inxf.ravel(), inyf.ravel(), inlam.ravel()]).T
+        self.f = np.array([inxf.ravel(), inyf.ravel(), inlam.ravel()]).T
         
-        c = np.array([ inxc.ravel(), inyc.ravel()]).T
+        self.c = np.array([ inxc.ravel(), inyc.ravel()]).T
         
-        #define interp/data arrange outside class??
-        self.interpolator = interpolate.LinearNDInterpolator(f,c)
-        self.gridsize = f.shape[0]
+        self.interpolator = None
+        
+        self.gridsize = self.f.shape[0]
 
     #make it just call self.interpolator, pass it xf yf lam to interp @, returns interpolated 
     def interp(self, outxf, outyf, outlam):
-    
+        if self.interpolator is None:    
+            self.interpolator = interpolate.LinearNDInterpolator(self.f,self.c)
+            
         xi = np.array([outxf.ravel(), outyf.ravel(), outlam.ravel()]).T
 
         return self.interpolator(xi)
-     
-class WFOSBlueFocalPlane2Detector(FocalPlane2Detector):
-    def __init__(self,filename,step=None):
-        whatfile = 'Blue_Low_Res_Spot_Data_9x9F_90W.txt'
+      
+#previously WFOSRedFocalPlane2Detector
+class WFOSFocalPlane2Detector(FocalPlane2Detector):
+    def __init__(self,whatfile,nx,ny,nl,step=None):
         modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', whatfile)
         self.db = np.genfromtxt(modelfile)
         
-        nx = 9
-        ny = 9
-        nl = 93
         nrows = nx*ny*nl
         row = np.arange(nrows).reshape(nx,ny,nl)
     
@@ -136,39 +137,18 @@ class WFOSBlueFocalPlane2Detector(FocalPlane2Detector):
         
         self.use_row_for_grid &= (self.db[:,-1] > 0)
         
-        inxf, inyf, inlam, inxc, inyc = grabdata(self.db,self.use_row_for_grid)
+        inxf, inyf, inlam, self.inxc, self.inyc = grabdata(self.db,self.use_row_for_grid)
         
-        super(WFOSBlueFocalPlane2Detector,self).__init__(inxf, inyf, inlam, inxc, inyc)
-        self.gridfrac = self.gridsize/self.db.shape[0]
-        #print(self.gridfrac)
-        
-class WFOSRedFocalPlane2Detector(FocalPlane2Detector):
-    def __init__(self,step):
-        whatfile = 'Red_Low_Res_Spot_Data_9x9F_90W.txt'
-        modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', whatfile)
-        self.db = np.genfromtxt(modelfile)
-        
-        nx = 9
-        ny = 9
-        nl = 93
-        nrows = nx*ny*nl
-        row = np.arange(nrows).reshape(nx,ny,nl)
-    
-        # Get the rows to use in the interpolator
-        thinned_rows = grid_thin_indx(row, step)
-
-        self.use_row_for_grid = np.zeros(row.size, dtype=bool)
-        self.use_row_for_grid[thinned_rows] = True
-        
-        self.use_row_for_grid &= (self.db[:,-1] > 0)
-        
-        inxf, inyf, inlam, inxc, inyc = grabdata(self.db,self.use_row_for_grid)
-        
-        super(WFOSRedFocalPlane2Detector,self).__init__(inxf, inyf, inlam, inxc, inyc)
+        super(WFOSFocalPlane2Detector,self).__init__(inxf, inyf, inlam, self.inxc, self.inyc)
         self.gridfrac = self.gridsize/self.db.shape[0]
 
-#"main" function     
-def main1():
+  
+def main():
+    """
+    7.23.19
+    old function that plots meandelta as a function of lambda or distance
+    need to change fpinterp to work
+    """
     plt.close('all')
     
     nx = 9
@@ -202,7 +182,6 @@ def main1():
         Df[:nd,j] = np.sqrt(np.square(outxf) + np.square(outyf))
         La[:nd,j] = outlam
         rf[:,j] = fpinterp.gridfrac
-        #print(fpinterp.gridfrac)
         delt[:nd,j] = distance(out_c, y)
         ma[nd:,j] = True   
  
@@ -210,7 +189,6 @@ def main1():
     unique, index = np.unique(rf[0,:],return_index = True)
     colors = np.empty((rf.shape[1],4), dtype = object)
     colors[index,:] = cm.get_cmap('seismic')(np.linspace(0,1,index.size))
-    
     
     for i in index:
         #La
@@ -223,10 +201,7 @@ def main1():
                 mdelt += [0]
                 continue
             mdelt += [np.nanmean(delt[indx,i])]
-        #print(redf[i])
-        #print(mdelt)
         plt.plot(df_u.compressed(), np.array(mdelt)[np.invert(df_u.mask)], color = (colors[i].tolist()), label = ('Reduction Factor = ' +str(redf[i])))
-        #print(df_u)
         #plt.plot(df_u, mdelt, color = tuple(colors[i].tolist()), label = ('Reduction Factor = ' +str(redf[i])))
         plt.legend()
     plt.title('Mean Delta Correlation- RED ARM')
@@ -235,10 +210,9 @@ def main1():
     fig = plt.gcf()
     fig.set_size_inches(18.5, 10.5)
     #plt.savefig('NEW df vs meandelt RED.jpg')
-    """
     plt.figure()
+    
     for i in index:
-        #Df
         df_u = np.ma.MaskedArray(np.unique(Df))
         mdelt = []
         for j,h in enumerate(df_u):
@@ -256,34 +230,218 @@ def main1():
     fig = plt.gcf()
     fig.set_size_inches(18.5, 10.5)
     #plt.savefig('NEW df vs meandelt RED.jpg')
+    
+    
+def tracefig():
     """
-    
-def main2():
+    7.23.19
+    function that generates/reads text files for random field points and interpolated points for 
+    specified files (under filenames)
+    also plots (and saves) interpolated points as well as random field points used
     """
-    1. define 6 interps outside loop
-    2.generate points
-    3. for each point, construct xf,yf for each lambda
-    4. call all 6 to get the plots
+    plt.close('all')
+    nfield = 20
+    lstep = 10
+    fieldfile = '{0}pts.txt'.format(nfield)
+    rc('font', size=14)
     
-    set xf yf lam to 0 make 1 plot
+    if  os.path.isfile(fieldfile) is True:
+        data = np.genfromtxt(fieldfile)
+        random_x = data[:,0]
+        random_y = data[:,1]
+    else:
+        random_x = np.random.uniform(-4.2,4.2,size=nfield)
+        random_y = np.random.uniform(-1.5,1.5,size=nfield)
+        np.savetxt(fieldfile, np.array([random_x,random_y]).T, fmt = ["%7.4f", "%7.4f"])
+  
+    plt.figure(figsize=(20,10))
+    filenames = ['Blue_Low_Res_Spot_Data_9x9F_90W.txt', 'Blue_Low_Spot_Data_2020_150.txt', 'Blue_Low_Spot_Data_4040_300.txt','Red_Low_Res_Spot_Data_9x9F_90W.txt', 'Red_Low_Spot_Data_2020_150.txt', 'Red_Low_Spot_Data_4040_300.txt']
     
-    pick 100 random points within the field (xf,yf), going to send to devika to ask her for the actual values at these points
-    for wavelength, generate vector that goes from 3100 - 10000 ang in steps of 1 angstrom
+    for i in filenames:
+        if i is 'Blue_Low_Res_Spot_Data_9x9F_90W.txt':
+            res = 'blue low'
+            xy = 9
+            lamb = 93
+            subp = 242
+            outdat = 'outdatabluel.txt'
+        elif i is 'Red_Low_Res_Spot_Data_9x9F_90W.txt':
+            res = 'red low'
+            xy = 9
+            lamb = 93
+            subp = 246
+            outdat = 'outdataredl.txt'
+        elif i is 'Blue_Low_Spot_Data_2020_150.txt':
+            res = 'blue mid'
+            xy = 20
+            lamb = 150
+            subp = 243
+            outdat = 'outdatabluem.txt'
+        elif i is 'Red_Low_Spot_Data_2020_150.txt':
+            res = 'red mid'
+            xy = 20
+            lamb = 150
+            subp = 247
+            outdat = 'outdataredm.txt'
+        elif i is 'Red_Low_Spot_Data_4040_300.txt':
+            res = 'red high'
+            xy = 40
+            lamb = 300
+            subp = 248
+            outdat = 'outdataredh.txt'
+        elif i is 'Blue_Low_Spot_Data_4040_300.txt':
+            res = 'blue high'
+            xy = 40
+            lamb = 300
+            subp = 244
+            outdat = 'outdatablueh.txt'
+        
+        #data & plot
+        plt.subplot(subp)
+        plt.title('Interpolation Test:' + res)
+        outlam = np.arange(3100, 10000, lstep).astype(float)/10000
+        plt.xlabel('X (pixels)')
+        plt.ylabel('Y (pixels)')
+        
+        if os.path.isfile(outdat) is True:
+            print('Reading...')
+            outc = np.genfromtxt(outdat)
+            for i in range (100):
+                indx = outc[:,2] == i
+                plt.scatter(outc[indx,0],outc[indx,1], c = cm.rainbow(outlam), s = 2)
+        else:
+            print('Generating...')
+            fpinterp = WFOSFocalPlane2Detector(i,xy,xy,lamb) 
+            nlam = outlam.size
+            savec = np.zeros((nlam*nfield,3), dtype = float)
+            for i,(x,y) in enumerate(zip(random_x, random_y)):
+                outxf = np.full(outlam.size, x, dtype=float)
+                outyf = np.full(outlam.size, y, dtype=float)
+                outc = fpinterp.interp(outxf, outyf, outlam)
+                savec[i*nlam:(i+1)*nlam,:2] = outc
+                savec[i*nlam:(i+1)*nlam,2] = i
+                plt.scatter(outc[:,0],outc[:,1], c = cm.rainbow(outlam), s = 2)
+            np.savetxt(outdat, savec,  fmt = ["%7.4f", "%7.4f","%3d"])
+            
+    plt.subplot(241)
+    plt.scatter(random_x, random_y, s = 2)
+    plt.title('Random xf & yf Used')
+    plt.xlabel('X (arcmin)')
+    plt.ylabel('Y (arcmin)')
+    plt.tight_layout()
     
+    #plt.savefig('trace.png')
+    #plt.savefig('trace.pdf')
+
+
+def tracediff():
+    """
+    7.23.19
+    function that reads text files for interpolated points and plots (and saves difference
+    between the different resolutions. need to change filenames if you want to color arm 
+    (change blue/red)
+    """
+    plt.close('all')
+    rc('font', size=16)
+#result says that function of lambda is ok but as a function of xy it sucks  
+    outcbm = np.genfromtxt('outdataredm.txt')
+    outcbl = np.genfromtxt('outdataredl.txt')
+    outcbh = np.genfromtxt('outdataredh.txt')
     
+    xbl = outcbl[:,0]
+    ybl = outcbl[:,1]
     
-    with the points, save them
+    xbm = outcbm[:,0]
+    ybm = outcbm[:,1]
     
-    build the interpolator using the 3 different versions (low, mid, high res), all points
+    xbh = outcbh[:,0]
+    ybh = outcbh[:,1]
     
-    use interp to predict where the 100 points are
+    yl = ybl.reshape(20,-1)
+    ym = ybm.reshape(20,-1)
+    nl = outcbl[:,2].reshape(20,-1)
+    j = (np.argmax(np.nanmean(yl-ym, axis = 1)))
     
-    look @ difference between predictions for all 3 res (theres no actual yet)
+    plt.figure(figsize=(20,13))
     
-    """  
-#call main function so it doesn't try to run without variables
+    plt.subplot(141)
+    plt.scatter(xbh-xbm,ybh, s = 2, c = 'r')
+    plt.title('X difference Red (high & mid)')
+    plt.xlabel('X difference (pixels)')
+    plt.ylabel('Y high res (pixels)')
+    
+    plt.subplot(142)
+    plt.scatter(ybh-ybm,ybh, s = 2, c = 'r')
+    plt.title('Y difference Red (high & mid)')
+    plt.xlabel('Y difference (pixels)')
+    plt.ylabel('Y high res (pixels)')
+    
+    plt.subplot(143)
+    plt.scatter(xbh-xbl,ybh, s = 2, c = 'r')
+    plt.title('X difference Red (low & high)')
+    plt.xlabel('X difference (pixels)')
+    plt.ylabel('Y high res (pixels)')
+    
+    plt.subplot(144)
+    plt.scatter(ybh-ybl,ybh, s = 2, c = 'r')
+    plt.title('Y difference Red (low & high)')
+    plt.xlabel('Y difference (pixels)')
+    plt.ylabel('Y high res (pixels)')
+    
+    plt.tight_layout()
+    
+    #plt.savefig('tracediff_red.png')
+    #plt.savefig('tracediff_red.pdf')
+    
+def interpdiff():
+    """
+    7.23.19
+    function that at 3 "random" preselected field points (xf,yf) that must exist within the high
+    res grid but not the mid or low res, generates the interpolator at either low or mid res 
+    (specify in fpinterp) and plots (and saves)comparison between the interpolated points and 
+    actual coordinates taken from the high res.
+    
+    need to change filenames if you want to color arm (change blue/red) or switch low/mid res
+    """
+    plt.close('all')
+    rc('font', size=16)
+    
+    #3 random points
+    xf = np.array([2.05, -1.83, 1.83])
+    yf = np.array([0.81, -1.42, -0.35])
+ 
+    #get the accurate high points, change file name depending on red/blue
+    modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Red_Low_Spot_Data_4040_300.txt')
+    db = np.genfromtxt(modelfile)
+    
+    save = np.zeros((0,5), dtype = float)
+
+    for i in range(3):
+        indx = (db[:,0]==xf[i]) & (db[:,1]==yf[i])
+        save = np.append(save, db[indx,:5], axis = 0)
+    
+    #specify interp setup depending on low/mid res
+    fpinterp = WFOSFocalPlane2Detector('Red_Low_Spot_Data_2020_150.txt',20,20,150)
+    
+    outxf = save[:,0]
+    outyf = save[:,1]
+    outlam = save[:,2]
+    outxc = save[:,3]/0.015
+    outyc = save[:,4]/0.015
+    
+    outc = fpinterp.interp(outxf, outyf, outlam)
+    plt.figure(figsize=(20,7.5))
+    plt.title('Difference between interpolated & actual (red m)')
+    plt.xlabel('X (pixels)')
+    plt.ylabel('Y (pixels)')
+    plt.scatter(outc[:,0]-outxc, outc[:,1]-outyc, s = 2, c='r')
+    
+    #plt.savefig('interpdiff_rm.png')
+    #plt.savefig('interpdiff_rm.pdf')
+    
+#need to pick which function you want to run here
 if __name__ == '__main__':
-    main()
-    
+    tracefig()
+
+
         
   

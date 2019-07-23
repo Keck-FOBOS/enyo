@@ -218,3 +218,32 @@ def getoutdata(db,step,lstep,flip):
     
     return outxf, outyf, outlam, outxc, outyc, out_c
 
+#7.23.19
+"""     
+class WFOSBlueFocalPlane2Detector(FocalPlane2Detector):
+    def __init__(self,whatfile,step=None):
+        modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', whatfile)
+        self.db = np.genfromtxt(modelfile)
+        
+        nx = 9
+        ny = 9
+        nl = 93
+        nrows = nx*ny*nl
+        row = np.arange(nrows).reshape(nx,ny,nl)
+    
+        # Get the rows to use in the interpolator
+        if step is not None:
+            thinned_rows = grid_thin_indx(row, step)
+            self.use_row_for_grid = np.zeros(row.size, dtype=bool)
+            self.use_row_for_grid[thinned_rows] = True
+        else:
+            self.use_row_for_grid = np.ones(row.size, dtype=bool) 
+        
+        self.use_row_for_grid &= (self.db[:,-1] > 0)
+        
+        inxf, inyf, inlam, inxc, inyc = grabdata(self.db,self.use_row_for_grid)
+        
+        super(WFOSBlueFocalPlane2Detector,self).__init__(inxf, inyf, inlam, inxc, inyc)
+        self.gridfrac = self.gridsize/self.db.shape[0]
+        #print(self.gridfrac)
+"""   
