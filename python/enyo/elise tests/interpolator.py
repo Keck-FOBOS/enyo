@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors, cm, figure
 from scipy import interpolate
 from matplotlib import rc
+from enyo.ARBTools.ARBInterp import tricubic
 
 #external functions   
 def max_thin_step(grid):
@@ -88,13 +89,14 @@ def grabdata(db,indx):
      inlam = db[indx,2]
      inxc = db[indx,3]/0.015
      inyc = db[indx,4]/0.015
-     return inxf,inyf,inlam,inxc,inyc
+     raysthru = db[indx,5]
+     return inxf,inyf,inlam,inxc,inyc,raysthru
  
     
 #FP2D class & Red/Blue derived classes
 class FocalPlane2Detector:
     #only work with data directly
-    def __init__(self, inxf, inyf, inlam, inxc, inyc):
+    def __init__(self, inxf, inyf, inlam, inxc, inyc, raysthru):
         """
         init shoud:
             generate elements from file
@@ -104,15 +106,25 @@ class FocalPlane2Detector:
         self.f = np.array([inxf.ravel(), inyf.ravel(), inlam.ravel()]).T
         
         self.c = np.array([ inxc.ravel(), inyc.ravel()]).T
+        self.cpt = np.array([inxc.ravel(), inyc.ravel(), raysthru.ravel()]).T
         
         self.interpolator = None
-        
+        self.interptri = None
         self.gridsize = self.f.shape[0]
 
     #make it just call self.interpolator, pass it xf yf lam to interp @, returns interpolated 
     def interp(self, outxf, outyf, outlam):
         if self.interpolator is None:    
             self.interpolator = interpolate.LinearNDInterpolator(self.f,self.c)
+            
+        xi = np.array([outxf.ravel(), outyf.ravel(), outlam.ravel()]).T
+
+        return self.interpolator(xi)
+    
+    #interpolates percentage of rays thru
+    def interpraysthru(self, outxf, outyf, outlam):
+        if self.interpolator is None:    
+            self.interpolator = interpolate.LinearNDInterpolator(self.f,self.cpt)
             
         xi = np.array([outxf.ravel(), outyf.ravel(), outlam.ravel()]).T
 
@@ -137,101 +149,13 @@ class WFOSFocalPlane2Detector(FocalPlane2Detector):
         
         self.use_row_for_grid &= (self.db[:,-1] > 0)
         
-        inxf, inyf, inlam, self.inxc, self.inyc = grabdata(self.db,self.use_row_for_grid)
+        inxf, inyf, inlam, self.inxc, self.inyc, self.raysthru = grabdata(self.db,self.use_row_for_grid)
+        #adding %raysthru to c
         
-        super(WFOSFocalPlane2Detector,self).__init__(inxf, inyf, inlam, self.inxc, self.inyc)
+        super(WFOSFocalPlane2Detector,self).__init__(inxf, inyf, inlam, self.inxc, self.inyc, self.raysthru)
         self.gridfrac = self.gridsize/self.db.shape[0]
 
-  
-def main():
-    """
-    7.23.19
-    old function that plots meandelta as a function of lambda or distance
-    need to change fpinterp to work
-    """
-    plt.close('all')
-    
-    nx = 9
-    ny = 9
-    nl = 93
-    nrows = nx*ny*nl
-    row = np.arange(nrows).reshape(nx,ny,nl)
-    redf = iteration_steps(row)
-    nrf = redf.size
-
-    Df = np.zeros((0,nrf),dtype='float')
-    La = np.zeros((0,nrf),dtype='float')
-    delt = np.zeros((0,nrf),dtype='float')
-    rf = np.zeros((0,nrf),dtype='float')
-    ma = np.zeros((0,nrf),dtype='bool')
-    
-    for j,i in enumerate(redf):
-        fpinterp = WFOSRedFocalPlane2Detector(i)
-        outxf, outyf, outlam, outxc, outyc = \
-                grabdata(fpinterp.db,np.invert(fpinterp.use_row_for_grid))
-        out_c = np.array([outxc.ravel(), outyc.ravel()]).T
-        y = fpinterp.interp(outxf,outyf,outlam)
-        nd = out_c.shape[0]
-
-        if Df.shape[0] < nd:
-            Df = np.vstack((Df,np.zeros((nd-Df.shape[0],nrf),dtype='float')))
-            La = np.vstack((La,np.zeros((nd-La.shape[0],nrf),dtype='float')))
-            delt = np.vstack((delt,np.zeros((nd-delt.shape[0],nrf),dtype='float')))
-            rf = np.vstack((rf,np.zeros((nd-rf.shape[0],nrf),dtype='float')))
-            ma = np.vstack((ma,np.zeros((nd-ma.shape[0],nrf),dtype='bool')))
-        Df[:nd,j] = np.sqrt(np.square(outxf) + np.square(outyf))
-        La[:nd,j] = outlam
-        rf[:,j] = fpinterp.gridfrac
-        delt[:nd,j] = distance(out_c, y)
-        ma[nd:,j] = True   
- 
-    #only keep unique rf/gridfrac values so there arent extra iterations
-    unique, index = np.unique(rf[0,:],return_index = True)
-    colors = np.empty((rf.shape[1],4), dtype = object)
-    colors[index,:] = cm.get_cmap('seismic')(np.linspace(0,1,index.size))
-    
-    for i in index:
-        #La
-        df_u = np.ma.MaskedArray(np.unique(La))
-        mdelt = []
-        for j,h in enumerate(df_u):
-            indx = (La[:,i] == h) & np.invert(ma[:,i]) & np.isfinite(delt[:,i])
-            if not np.any(indx):
-                df_u[j] = np.ma.masked
-                mdelt += [0]
-                continue
-            mdelt += [np.nanmean(delt[indx,i])]
-        plt.plot(df_u.compressed(), np.array(mdelt)[np.invert(df_u.mask)], color = (colors[i].tolist()), label = ('Reduction Factor = ' +str(redf[i])))
-        #plt.plot(df_u, mdelt, color = tuple(colors[i].tolist()), label = ('Reduction Factor = ' +str(redf[i])))
-        plt.legend()
-    plt.title('Mean Delta Correlation- RED ARM')
-    plt.xlabel('lam')
-    plt.ylabel('Mean Delta (pixels)')
-    fig = plt.gcf()
-    fig.set_size_inches(18.5, 10.5)
-    #plt.savefig('NEW df vs meandelt RED.jpg')
-    plt.figure()
-    
-    for i in index:
-        df_u = np.ma.MaskedArray(np.unique(Df))
-        mdelt = []
-        for j,h in enumerate(df_u):
-            indx = (Df[:,i] == h) & np.invert(ma[:,i]) & np.isfinite(delt[:,i])
-            if not np.any(indx):
-                df_u[j] = np.ma.masked
-                mdelt += [0]
-                continue
-            mdelt += [np.nanmean(delt[indx,i])]
-        plt.plot(df_u, mdelt, color = colors[i], label = ('Reduction Factor = ' +str(redf[i])))
-        plt.legend()
-    plt.title('Mean Delta Correlation- RED ARM')
-    plt.xlabel('lam')
-    plt.ylabel('Mean Delta (pixels)')
-    fig = plt.gcf()
-    fig.set_size_inches(18.5, 10.5)
-    #plt.savefig('NEW df vs meandelt RED.jpg')
-    
-    
+   
 def tracefig():
     """
     7.23.19
@@ -328,10 +252,6 @@ def tracefig():
     plt.xlabel('X (arcmin)')
     plt.ylabel('Y (arcmin)')
     plt.tight_layout()
-    
-    #plt.savefig('trace.png')
-    #plt.savefig('trace.pdf')
-
 
 def tracediff():
     """
@@ -391,7 +311,7 @@ def tracediff():
     
     #plt.savefig('tracediff_red.png')
     #plt.savefig('tracediff_red.pdf')
-    
+
 def interpdiff():
     """
     7.23.19
@@ -438,10 +358,110 @@ def interpdiff():
     #plt.savefig('interpdiff_rm.png')
     #plt.savefig('interpdiff_rm.pdf')
     
+def interpfig():
+    plt.close('all')
+    
+    #load & parse
+    dbh = np.genfromtxt(os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Blue_Low_Spot_Data_4040_300.txt'))
+    dbm = np.genfromtxt(os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Blue_Low_Spot_Data_2020_150.txt'))
+    dbl = np.genfromtxt(os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Blue_Low_Res_Spot_Data_9x9F_90W.txt'))
+    
+    xfh = dbh[:,0]
+    yfh = dbh[:,1]
+
+    xfm = dbm[:,0]
+    yfm = dbm[:,1]
+    
+
+    xfu = np.setdiff1d(xfh,xfm)
+    yfu = np.setdiff1d(yfh,yfm)
+
+    #get the accurate high points, change file name depending on red/blue
+    save = np.zeros((0,5), dtype = float)
+
+    for i in range(38):
+        indx = (dbh[:,0]==xfu[i]) & (dbh[:,1]==yfu[i])
+        save = np.append(save, dbh[indx,:5], axis = 0)
+    
+    #specify interp setup depending on low/mid res
+    fpinterpm = WFOSFocalPlane2Detector('Blue_Low_Spot_Data_2020_150.txt',20,20,150)
+    fpinterpl = WFOSFocalPlane2Detector('Blue_Low_Res_Spot_Data_9x9F_90W.txt',9,9,93)
+    
+    outxf = save[:,0]
+    outyf = save[:,1]
+    outlam = save[:,2]
+    outxc = save[:,3]/0.015
+    outyc = save[:,4]/0.015
+    
+    outcm = fpinterpm.interp(outxf, outyf, outlam)
+    outcl = fpinterpl.interp(outxf, outyf, outlam)
+    
+    rc('font', size=16)
+    plt.figure(figsize=(20,7.5))
+    plt.title('Low Interp & Mid Interp Difference')
+    plt.xlabel('X (pixels)')
+    plt.ylabel('Y (pixels)')
+    plt.scatter(outxc - outcm[:,0], outyc - outcm[:,1], s = 2, marker = 'o', c='r', label = 'mid interp')
+    plt.scatter(outxc - outcl[:,0], outyc - outcl[:,1], s = 2, marker = 'o', c='g', label = 'low interp')
+    #plt.scatter(outxc, outyc, marker = '+', c='b', label = 'actual')
+    plt.legend()
+
+def testraysthru():
+    
+    plt.close('all')
+    rc('font', size=16)
+    
+    #3 random points
+    xf = np.array([2.05, -1.83, 1.83])
+    yf = np.array([0.81, -1.42, -0.35])
+    
+    #get the accurate high points, change file name depending on red/blue
+    modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Red_Low_Spot_Data_4040_300.txt')
+    db = np.genfromtxt(modelfile)
+    
+    save = np.zeros((0,6), dtype = float)
+
+    for i in range(3):
+        indx = (db[:,0]==xf[i]) & (db[:,1]==yf[i])
+        save = np.append(save, db[indx,:6], axis = 0)
+    
+    #specify interp setup depending on low/mid res
+    fpinterp = WFOSFocalPlane2Detector('Red_Low_Res_Spot_Data_9x9F_90W.txt',9,9,93)
+    fpinterpm = WFOSFocalPlane2Detector('Red_Low_Spot_Data_2020_150.txt',20,20,150)
+    
+    outxf = save[:,0]
+    outyf = save[:,1]
+    outlam = save[:,2]
+    outxc = save[:,3]/0.015
+    outyc = save[:,4]/0.015
+    outraysthru = save[:,5]
+    
+    outc = fpinterp.interpraysthru(outxf, outyf, outlam)
+    outcm = fpinterpm.interpraysthru(outxf, outyf, outlam)
+    
+
+    plt.figure(figsize=(20,7.5))
+    plt.title('Rays Thru Test')
+    plt.xlabel('Wavelength (microns)')
+    plt.ylabel('% Rays Through')
+    plt.plot(outlam[:300], outraysthru[:300], c='k', label = '<300')
+    plt.plot(outlam[:300], outc[:300,2], c='r', label = 'low')
+    plt.plot(outlam[:300], outcm[:300,2], c='g', label = 'mid')
+
+    plt.plot(outlam[300:600], outraysthru[300:600], c ='k', linestyle = '--',label = '300-600')
+    plt.plot(outlam[300:600], outc[300:600,2], c='r', label = 'low')
+    plt.plot(outlam[300:600], outcm[300:600,2], c='g', label = 'mid')
+
+    plt.plot(outlam[600:], outraysthru[600:], c = 'k', linestyle = ':', label = '>600')
+    plt.plot(outlam[600:], outc[600:,2], c='r', label = 'low')
+    plt.plot(outlam[600:], outcm[600:,2], c='g', label = 'mid')
+    #add legend, save plot, add to google doc
+    plt.legend()
+    
+    
 #need to pick which function you want to run here
+#note: older tests are located in "old functions.py"
 if __name__ == '__main__':
-    tracefig()
+    testraysthru()
 
-
-        
   
