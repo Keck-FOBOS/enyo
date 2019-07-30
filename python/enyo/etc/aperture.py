@@ -13,6 +13,59 @@ from scipy import signal
 from shapely.geometry import Point, asPolygon
 from shapely.affinity import rotate
 
+def polygon_winding_number(polygon, point):
+    """
+    Determine the winding number of a 2D polygon about a point.  The
+    code does **not** check if the polygon is simple (no interesecting
+    line segments).  Algorithm taken from Numerical Recipies Section
+    21.4.
+
+    Args:
+        polygon (numpy.ndarray): An Nx2 array containing the x,y
+            coordinates of a polygon.  The points should be ordered
+            either counter-clockwise or clockwise.
+        point (numpy.ndarray): A 2-element array defining the x,y
+            position of the point to use as a reference for the winding
+            number.
+
+    Returns:
+        int: Winding number of `polygon` w.r.t. `point`
+
+    Raises:
+        ValueError: Raised if `polygon` is not 2D, if `polygon` does not
+            have two columns, or if `point` is not a 2-element array.
+    """
+    # Check input shape is for 2D only
+    if len(polygon.shape) != 2:
+        raise ValueError('Polygon must be an Nx2 array.')
+    if polygon.shape[1] != 2:
+        raise ValueError('Polygon must be in two dimensions.')
+    _point = numpy.atleast_2d(point)
+    if _point.shape[1] != 2:
+        raise ValueError('Point must contain two elements.')
+
+    # Get the winding number
+    nvert = polygon.shape[0]
+    np = _point.shape[0]
+
+    dl = numpy.roll(polygon, 1, axis=0)[None,:,:] - _point[:,None,:]
+    dr = polygon[None,:,:] - point[:,None,:]
+    dx = dl[:,:,0]*dr[:,:,1] - dl[:,:,1]*dr[:,:,0]
+
+    indx_l = dl[:,:,1] > 0
+    indx_r = dr[:,:,1] > 0
+
+    wind = numpy.zeros((np, nvert), dtype=int)
+    wind[indx_l & numpy.invert(indx_r) & (dx < 0)] = -1
+    wind[numpy.invert(indx_l) & indx_r & (dx > 0)] = 1
+
+    return numpy.sum(wind, axis=1)[0] if point.ndim == 1 else numpy.sum(wind, axis=1)
+
+
+def point_inside_polygon(polygon, point):
+    return numpy.absolute(polygon_winding_number(polygon, point)) == 1
+
+
 class Aperture:
     """
     Abstract class for a general aperture shape.
@@ -88,23 +141,48 @@ class Aperture:
 
         if method == 'whole':
             # Only include whole pixels
-            X,Y = map(lambda x : x.ravel(), numpy.meshgrid(x, y))
-            img = numpy.array(list(map(lambda x: self.shape.contains(Point(x[0],x[1])),
-                                        zip(X,Y)))).reshape(ny,nx).astype(int)/cell_area
+#            X,Y = map(lambda x : x.ravel(), numpy.meshgrid(x, y))
+#            img = numpy.array(list(map(lambda x: self.shape.contains(Point(x[0],x[1])),
+#                                        zip(X,Y)))).reshape(ny,nx).astype(int)/cell_area
+            # Build the coordinate of the pixel centers
+            coo = numpy.array(list(map(lambda x : x.ravel(), numpy.meshgrid(x, y)))).T
+            # Find the pixels with their centers inside the shape
+            img = point_inside_polygon(self.vertices(), coo).reshape(ny,nx).astype(int)/cell_area
+            # Return after adjusting to match the defined area
             return img * (self.area/numpy.sum(img)/cell_area)
-
         elif method == 'fractional':
             # Allow for fractional pixels by determining the overlap
             # between the shape and each grid cell
 
-            # Build the cell polygons
-            cells, sx, ex, sy, ey = self._overlapping_grid_polygons(x, y)
+#            # Build the cell polygons
+#            cells, sx, ex, sy, ey = self._overlapping_grid_polygons(x, y)
+#
+#            # Construct a grid with the fractional area covered by the
+#            # aperture
+#            img = numpy.zeros((len(y), len(x)), dtype=float)
+#            img[sy:ey,sx:ex] = numpy.array(list(map(lambda x: self.shape.intersection(x).area,
+#                                                    cells))).reshape(ey-sy,ex-sx)/cell_area
+#            return img * (self.area/numpy.sum(img)/cell_area)
 
-            # Construct a grid with the fractional area covered by the
-            # aperture
+            # NOTE: This is much faster than the above
+            sx, ex, _, sy, ey, _ = self._overlapping_region(x,y)
+
+            X,Y = map(lambda x : x.ravel(), numpy.meshgrid(x[sx:ex], y[sy:ey]))
+
+            # Get the points describing the corners of each overlapping grid cell
+            cx = X[:,None] + (numpy.array([-0.5,0.5,0.5,-0.5])*dx)[None,:]
+            cy = Y[:,None] + (numpy.array([-0.5,-0.5,0.5,0.5])*dy)[None,:]
+            cells = numpy.append(cx, cy, axis=1).reshape(-1,2,4).transpose(0,2,1).reshape(-1,2)
+            # cells has shape (ncell*4,2)
+            inside_shape = point_inside_polygon(self.vertices(), cells).reshape(-1,4)
+            indx = numpy.all(inside_shape, axis=1)
+            _img = indx.astype(float)
+            intersect = numpy.any(inside_shape, axis=1) & numpy.invert(indx)
+            _img[intersect] = numpy.array(list(map(lambda x:
+                                                    self.shape.intersection(asPolygon(x)).area,
+                                                cells.reshape(-1,4,2)[intersect,...])))/cell_area
             img = numpy.zeros((len(y), len(x)), dtype=float)
-            img[sy:ey,sx:ex] = numpy.array(list(map(lambda x: self.shape.intersection(x).area,
-                                                cells))).reshape(ey-sy,ex-sx)/cell_area
+            img[sy:ey,sx:ex] = _img.reshape(ey-sy,ex-sx)
             return img * (self.area/numpy.sum(img)/cell_area)
 
         raise ValueError('Unknown response method {0}.'.format(method))
@@ -117,6 +195,48 @@ class Aperture:
 #            j = k - i*ny
 #            alpha[i,j] = cells[k].intersection(self.shape).area
 #        return alpha
+
+    def _overlapping_region(self, x, y):
+        r"""
+        Return the starting and indices of the grid cells that overlap
+        with the shape bounds.
+
+        Args:
+            x (array-like):
+                The list of x coordinates for the grid.  Must be
+                linearly spaced.
+            y (array-like):
+                The list of y coordinates for the grid.  Must be
+                linearly spaced.
+        
+        Returns:
+            tuple: Returns the integer starting and ending x index, the
+            grid step in x, the starting and ending y index, and the
+            grid step in y for the region of the grid that overlaps the
+            shape boundary.
+        """
+        # Get the cell size
+        dx = abs(x[1]-x[0])
+        dy = abs(y[1]-y[0])
+
+        # Find the x coordinates of the grid cells that overlap the shape
+        xlim = list(self.shape.bounds[::2])
+        if xlim[0] > xlim[1]:
+            xlim = xlim[::-1]
+        xindx = (x+0.5*dx > xlim[0]) & (x-0.5*dx < xlim[1])
+        sx = numpy.arange(len(x))[xindx][0]
+        ex = numpy.arange(len(x))[xindx][-1]+1
+
+        # Find the y coordinates of the grid cells that overlap the shape
+        ylim = list(self.shape.bounds[1::2])
+        if ylim[0] > ylim[1]:
+            ylim = ylim[::-1]
+        yindx = (y+0.5*dy > ylim[0]) & (y-0.5*dy < ylim[1])
+        sy = numpy.arange(len(y))[yindx][0]
+        ey = numpy.arange(len(y))[yindx][-1]+3
+
+        return sx, ex, dx, sy, ey, dy
+
 
     def _overlapping_grid_polygons(self, x, y):
         r"""
@@ -140,7 +260,7 @@ class Aperture:
                 linearly spaced.
         
         Returns:
-            Four objects are returned:
+            Five objects are returned:
                 - A list of shapely.geometry.polygon.Polygon objects, on
                   per grid cell.  Only those grid cells that are
                   expected to overlap the shape's bounding box are
@@ -148,25 +268,7 @@ class Aperture:
                 - The starting and ending x index and the starting and
                   ending y index for the returned list of cell polygons.
         """
-        # Get the cell size
-        dx = abs(x[1]-x[0])
-        dy = abs(y[1]-y[0])
-
-        # Find the x coordinates of the grid cells that overlap the shape
-        xlim = list(self.shape.bounds[::2])
-        if xlim[0] > xlim[1]:
-            xlim = xlim[::-1]
-        xindx = (x+0.5*dx > xlim[0]) & (x-0.5*dx < xlim[1])
-        sx = numpy.arange(len(x))[xindx][0]
-        ex = numpy.arange(len(x))[xindx][-1]+1
-
-        # Find the y coordinates of the grid cells that overlap the shape
-        ylim = list(self.shape.bounds[1::2])
-        if ylim[0] > ylim[1]:
-            ylim = ylim[::-1]
-        yindx = (y+0.5*dy > ylim[0]) & (y-0.5*dy < ylim[1])
-        sy = numpy.arange(len(y))[yindx][0]
-        ey = numpy.arange(len(y))[yindx][-1]+3
+        sx, ex, dx, sy, ey, dy = self._overlapping_region(x, y)
 
         # Construct the grid
         X,Y = map(lambda x : x.ravel(), numpy.meshgrid(x[sx:ex], y[sy:ey]))
@@ -289,6 +391,10 @@ class Aperture:
         aperture_image = self.response(source.x, source.y, method=response_method)
         return signal.fftconvolve(source.data, aperture_image*numpy.square(source.sampling),
                                   mode='same')
+
+    def vertices(self, wrap=False):
+        vert = numpy.array(self.shape.exterior.coords)
+        return vert if wrap else vert[:-1]
         
 
 class FiberAperture(Aperture):
