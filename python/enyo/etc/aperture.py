@@ -428,11 +428,16 @@ class FiberAperture(Aperture):
     """
     Define a fiber aperture.
 
+    Note that the units for the center and diameter are only relevant
+    in the application of the aperture to a source. They should
+    typically be in arcseconds, with the center being relative to the
+    source to observe.
+
     Args:
         cx (scalar-like):
-            On-sky center X coordinate.
+            Center X coordinate.
         cy (scalar-like):
-            On-sky center Y coordinate.
+            Center Y coordinate.
         d (scalar-like):
             Fiber diameter.  Aperture is assumed to be a circle resolved
             by a set of line segments.
@@ -463,6 +468,11 @@ class SlitAperture(Aperture):
     y axis and the width along the x axis.  The rotation is
     counter-clockwise in a right-handed Cartesian frame.
 
+    Note that the units for the center, width, and length are only
+    relevant in the application of the aperture to a source. They
+    should typically be in arcseconds, with the center being relative
+    to the source to observe.
+
     Exactly the same aperture is obtained in the following two calls::
 
         s = SlitAperture(0., 0., 1, 10)
@@ -470,9 +480,9 @@ class SlitAperture(Aperture):
 
     Args:
         cx (scalar-like):
-            On-sky center X coordinate.
+            Center X coordinate.
         cy (scalar-like):
-            On-sky center Y coordinate.
+            Center Y coordinate.
         width (scalar-like):
             Slit width along the unrotated x axis.
         length (scalar-like):
