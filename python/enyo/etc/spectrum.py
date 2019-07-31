@@ -15,6 +15,7 @@ from matplotlib import pyplot
 
 #from mangadap.util.lineprofiles import FFTGaussianLSF
 from mangadap.util.lineprofiles import IntegratedGaussianLSF
+from .sampling import Resample
 
 def spectral_coordinate_step(wave, log=False, base=10.0):
     """
@@ -156,6 +157,9 @@ class Spectrum:
         """
         return self.interpolator.y
 
+    def __len__(self):
+        return self.interpolator.x.size
+
     def __getitem__(self, s):
         """
         Access the flux data directly via slicing.
@@ -198,6 +202,8 @@ class Spectrum:
     def wavelength_step(self):
         """
         Return the wavelength step per pixel.
+
+        TODO: FIX THIS!!  It shouldn't use spectral_coordinate_step to get the mean dw.
         """
         # TODO: Lazy load and then keep this?
         dw = spectral_coordinate_step(self.wave, log=self.log)
@@ -280,6 +286,31 @@ class Spectrum:
     def show(self):
         pyplot.plot(self.wave, self.flux)
         pyplot.show()
+
+    def resample(self, wave, log=False):
+        """
+        Resample the spectrum to a new wavelength array.
+
+        Args:
+            wave (`numpy.ndarray`_):
+                New wavelength array. Must be linearly or
+                log-linearly sampled.
+            log (:obj:`bool`, optional):
+                Flag that the wavelength array is log-linearly
+                sampled.
+
+        Returns:
+            :class:`Spectrum`: Returns a a resampled version of
+            itself. TODO: The resampled version currently looses any
+            error or resolution vectors...
+        """
+        # TODO: Make this better!
+        rng = wave[[0,-1]]
+        if log:
+            rng = numpy.log10(rng)
+        r = Resample(self.flux, x=self.wave, inLog=self.log, newRange=rng, newpix=wave.size,
+                     newLog=log)
+        return Spectrum(r.outx, r.outy, log=log)
 
 
 class EmissionLineSpectrum(Spectrum):

@@ -58,6 +58,13 @@ class SpectrographArm:
                                            self.detector.pixelsize, onsky_source=onsky_source,
                                            scramble=self.scramble)
 
+    def twod_spectrum(self, sky_spectrum, spec_aperture, source_distribution=None,
+                      source_spectrum=None, wave_lim=None):
+        return observe.twod_spectrum(sky_spectrum, spec_aperture, self.kernel, self.platescale,
+                                     self.dispscale, self.detector.pixelsize,
+                                     source_distribution=source_distribution,
+                                     source_spectrum=source_spectrum, wave_lim=wave_lim)
+
     def observe(sky, sky_spectrum, spec_aperture, exposure_time, airmass, onsky_source=None,
                 source_spectrum=None, extraction=None):
         """
@@ -160,6 +167,21 @@ class TMTWFOS:  #(MultiArmSpectrograph)
         if arm is not None:
             return self.arms[arm].monochromatic_image(sky, spec_aperture, onsky_source=onsky_source)
         return dict([(key, a.monochromatic_image(sky, spec_aperture, onsky_source=onsky_source))
+                         for key,a in self.arms.items()])
+
+    def twod_spectrum(self, sky_spectrum, spec_aperture, source_distribution=None,
+                      source_spectrum=None, wave_lim=None, arm=None):
+        """
+        Generate a 2D spectrum of the source through the aperture in
+        one or more of the spectrograph arms.
+        """
+        if arm is not None:
+            return self.arms[arm].twod_spectrum(sky_spectrum, spec_aperture,
+                                                source_distribution=source_distribution,
+                                                source_spectrum=source_spectrum, wave_lim=wave_lim)
+        return dict([(key, a.twod_spectrum(sky_spectrum, spec_aperture,
+                                           source_distribution=source_distribution,
+                                            source_spectrum=source_spectrum, wave_lim=wave_lim))
                          for key,a in self.arms.items()])
 
 #    def observe(self, source_distribution, source_spectrum, sky_distribution, sky_spectrum,

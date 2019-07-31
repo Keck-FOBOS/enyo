@@ -21,19 +21,26 @@ def polygon_winding_number(polygon, point):
     21.4.
 
     Args:
-        polygon (numpy.ndarray): An Nx2 array containing the x,y
-            coordinates of a polygon.  The points should be ordered
-            either counter-clockwise or clockwise.
-        point (numpy.ndarray): A 2-element array defining the x,y
-            position of the point to use as a reference for the winding
-            number.
+        polygon (`numpy.ndarray`_):
+            An Nx2 array containing the x,y coordinates of a polygon.
+            The points should be ordered either counter-clockwise or
+            clockwise.
+        point (`numpy.ndarray`_):
+            One or more points for the winding number calculation.
+            Must be either a 2-element array for a single (x,y) pair,
+            or an Nx2 array with N (x,y) points.
 
     Returns:
-        int: Winding number of `polygon` w.r.t. `point`
+        int or `numpy.ndarray`: The winding number of each point with
+        respect to the provided polygon. Points inside the polygon
+        have winding numbers of 1 or -1; see
+        :func:`point_inside_polygon`.
 
     Raises:
-        ValueError: Raised if `polygon` is not 2D, if `polygon` does not
-            have two columns, or if `point` is not a 2-element array.
+        ValueError:
+            Raised if `polygon` is not 2D, if `polygon` does not have
+            two columns, or if the last axis of `point` does not have
+            2 and only 2 elements.
     """
     # Check input shape is for 2D only
     if len(polygon.shape) != 2:
@@ -63,6 +70,26 @@ def polygon_winding_number(polygon, point):
 
 
 def point_inside_polygon(polygon, point):
+    """
+    Determine if one or more points is inside the provided polygon.
+
+    Primarily a wrapper for :func:`polygon_winding_number`, that
+    returns True for each poing that is inside the polygon.
+
+    Args:
+        polygon (`numpy.ndarray`_):
+            An Nx2 array containing the x,y coordinates of a polygon.
+            The points should be ordered either counter-clockwise or
+            clockwise.
+        point (`numpy.ndarray`_):
+            One or more points for the winding number calculation.
+            Must be either a 2-element array for a single (x,y) pair,
+            or an Nx2 array with N (x,y) points.
+
+    Returns:
+        bool or `numpy.ndarray`: Boolean indicating whether or not
+        each point is within the polygon.
+    """
     return numpy.absolute(polygon_winding_number(polygon, point)) == 1
 
 
