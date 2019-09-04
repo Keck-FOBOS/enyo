@@ -109,6 +109,8 @@ class FocalPlane2Detector:
         self.cpt = np.array([inxc.ravel(), inyc.ravel(), raysthru.ravel()]).T
         
         self.interpolator = None
+        self.inverse = None
+        
         self.interptri = None
         self.gridsize = self.f.shape[0]
 
@@ -120,6 +122,14 @@ class FocalPlane2Detector:
         xi = np.array([outxf.ravel(), outyf.ravel(), outlam.ravel()]).T
 
         return self.interpolator(xi)
+    
+    def invinterp(self, outxc, outyc, outyf):
+        if self.inverse is None:    
+            self.inverse = interpolate.LinearNDInterpolator(np.array([self.c[:,0], self.c[:,1], self.f[:,1]]).T, self.f[:,[0,2]])
+            
+        xi = np.array([outxc.ravel(), outyc.ravel(), outyf.ravel()]).T
+
+        return self.inverse(xi)
     
     #interpolates percentage of rays thru
     def interpraysthru(self, outxf, outyf, outlam):
@@ -180,6 +190,7 @@ def tracefig():
   
     plt.figure(figsize=(20,10))
     filenames = ['Blue_Low_Res_Spot_Data_9x9F_90W.txt', 'Blue_Low_Spot_Data_2020_150.txt', 'Blue_Low_Spot_Data_4040_300.txt','Red_Low_Res_Spot_Data_9x9F_90W.txt', 'Red_Low_Spot_Data_2020_150.txt', 'Red_Low_Spot_Data_4040_300.txt']
+    ax = None
     
     for i in filenames:
         if i is 'Blue_Low_Res_Spot_Data_9x9F_90W.txt':
@@ -220,12 +231,15 @@ def tracefig():
             outdat = 'outdatablueh.txt'
         
         #data & plot
-        plt.subplot(subp)
+        #8.5.19
+        #catch, mess with order of subplots and share axes
+        ax = plt.subplot(subp, sharex = ax)
         plt.title('Interpolation Test:' + res)
         outlam = np.arange(3100, 10000, lstep).astype(float)/10000
         plt.xlabel('X (pixels)')
         plt.ylabel('Y (pixels)')
-        
+        plt.xlim(-155, -140)
+        plt.ylim(-8500, 8500)
         if os.path.isfile(outdat) is True:
             print('Reading...')
             outc = np.genfromtxt(outdat)
@@ -237,17 +251,19 @@ def tracefig():
             fpinterp = WFOSFocalPlane2Detector(i,xy,xy,lamb) 
             nlam = outlam.size
             savec = np.zeros((nlam*nfield,3), dtype = float)
+            
             for i,(x,y) in enumerate(zip(random_x, random_y)):
                 outxf = np.full(outlam.size, x, dtype=float)
                 outyf = np.full(outlam.size, y, dtype=float)
                 outc = fpinterp.interp(outxf, outyf, outlam)
                 savec[i*nlam:(i+1)*nlam,:2] = outc
                 savec[i*nlam:(i+1)*nlam,2] = i
+                
                 plt.scatter(outc[:,0],outc[:,1], c = cm.rainbow(outlam), s = 2)
             np.savetxt(outdat, savec,  fmt = ["%7.4f", "%7.4f","%3d"])
             
     plt.subplot(241)
-    plt.scatter(random_x, random_y, s = 2)
+    plt.scatter(random_x, random_y, s = 20, c ='k')
     plt.title('Random xf & yf Used')
     plt.xlabel('X (arcmin)')
     plt.ylabel('Y (arcmin)')
@@ -330,7 +346,7 @@ def interpdiff():
     yf = np.array([0.81, -1.42, -0.35])
  
     #get the accurate high points, change file name depending on red/blue
-    modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Red_Low_Spot_Data_4040_300.txt')
+    modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Blue_Low_Spot_Data_4040_300.txt')
     db = np.genfromtxt(modelfile)
     
     save = np.zeros((0,5), dtype = float)
@@ -340,7 +356,7 @@ def interpdiff():
         save = np.append(save, db[indx,:5], axis = 0)
     
     #specify interp setup depending on low/mid res
-    fpinterp = WFOSFocalPlane2Detector('Red_Low_Spot_Data_2020_150.txt',20,20,150)
+    fpinterp = WFOSFocalPlane2Detector('Blue_Low_Spot_Data_2020_150.txt',20,20,150)
     
     outxf = save[:,0]
     outyf = save[:,1]
@@ -349,12 +365,23 @@ def interpdiff():
     outyc = save[:,4]/0.015
     
     outc = fpinterp.interp(outxf, outyf, outlam)
-    plt.figure(figsize=(20,7.5))
-    plt.title('Difference between interpolated & actual (red m)')
-    plt.xlabel('X (pixels)')
-    plt.ylabel('Y (pixels)')
-    plt.scatter(outc[:,0]-outxc, outc[:,1]-outyc, s = 2, c='r')
+    fig , ax1 = plt.subplots(1,1, figsize=(10,10))
+    xlim_pix = np.array([-5,3])
+    ylim_pix = np.array([-3,10])
+
+    plt.xlabel('Difference in X (pixels)')
+    plt.ylabel('Difference in Y (pixels)')
+    ax1.scatter(outc[:,0]-outxc, outc[:,1]-outyc, s = 20, alpha = 0.5, c='b')
     
+    ax2 = ax1.twinx()
+    ax2.set_ylim(ylim_pix/16000)
+    ax2.set_ylabel(r'$\Delta Y$')
+    
+    ax3 = ax1.twiny()
+    ax3.set_xlim(xlim_pix/10000)
+    ax3.set_xlabel(r'$\Delta X$')
+    plt.title('3 Point Interpolation VS Truth (Blue Mid)', y=1.1)
+    plt.tight_layout()
     #plt.savefig('interpdiff_rm.png')
     #plt.savefig('interpdiff_rm.pdf')
     
@@ -396,16 +423,29 @@ def interpfig():
     outcm = fpinterpm.interp(outxf, outyf, outlam)
     outcl = fpinterpl.interp(outxf, outyf, outlam)
     
-    rc('font', size=16)
-    plt.figure(figsize=(20,7.5))
-    plt.title('Low Interp & Mid Interp Difference')
-    plt.xlabel('X (pixels)')
-    plt.ylabel('Y (pixels)')
-    plt.scatter(outxc - outcm[:,0], outyc - outcm[:,1], s = 2, marker = 'o', c='r', label = 'mid interp')
-    plt.scatter(outxc - outcl[:,0], outyc - outcl[:,1], s = 2, marker = 'o', c='g', label = 'low interp')
-    #plt.scatter(outxc, outyc, marker = '+', c='b', label = 'actual')
-    plt.legend()
-
+    #rc('font', size=13)
+    
+    fig, ax1 = plt.subplots(1,1, figsize = (12,12))
+    
+    plt.xlabel('Difference in X (pixels)')
+    plt.ylabel('Difference in Y (pixels)')
+    ax1.scatter(outxc - outcm[:,0], outyc - outcm[:,1], s = 20, alpha = 0.5, lw = 0, marker = 'o', c='purple', label = 'Meduim Res')
+    ax1.scatter(outxc - outcl[:,0], outyc - outcl[:,1], s = 20, alpha = 0.5, lw = 0, marker = 'o', c='orange', label = 'Low Res')
+    ax1.legend(['Meduim Res' , 'Low Res'])
+    xlim_pix = np.array([-10,10])
+    ylim_pix = np.array([-10,10])
+     
+    ax2 = ax1.twinx()
+    ax2.set_ylim(ylim_pix/16000)
+    ax2.set_ylabel(r'$\Delta Y$')
+    
+    ax3 = ax1.twiny()
+    ax3.set_xlim(xlim_pix/10000)
+    ax3.set_xlabel(r'$\Delta X$')
+    plt.title('Interpolation VS Truth (Blue Cam)', y=1.1)
+    
+    plt.tight_layout()
+    
 def testraysthru():
     
     plt.close('all')
@@ -439,6 +479,7 @@ def testraysthru():
     outc = fpinterp.interpraysthru(outxf, outyf, outlam)
     outcm = fpinterpm.interpraysthru(outxf, outyf, outlam)
     
+    print(outlam.shape)
 
     plt.figure(figsize=(20,7.5))
     plt.title('Rays Thru Test')
@@ -457,11 +498,84 @@ def testraysthru():
     plt.plot(outlam[600:], outcm[600:,2], c='g', label = 'mid')
     #add legend, save plot, add to google doc
     plt.legend()
+
+
+def testinvert():
+    """
+    7.31.19
+    test setup for invinterp
     
+    take xf yf lam (at some point), interp to get xc and yc, then use xc yc yf to invinterp get xf and lam, check if xf here and firs xf are the same
+    """
+    plt.close('all')
+
+    #3 random points
+    xf = np.array([2.05, -1.83, 1.83])
+    yf = np.array([0.81, -1.42, -0.35]) 
+        
+    #get the accurate high points, change file name depending on red/blue
+    modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos', 'Red_Low_Spot_Data_4040_300.txt')
+    db = np.genfromtxt(modelfile)
     
+    save = np.zeros((0,6), dtype = float)
+
+    for i in range(3):
+        indx = (db[:,0]==xf[i]) & (db[:,1]==yf[i])
+        save = np.append(save, db[indx,:6], axis = 0)
+    
+    #specify interp setup depending on low/mid res
+    fpinterp = WFOSFocalPlane2Detector('Red_Low_Res_Spot_Data_9x9F_90W.txt',9,9,93)
+    #fpinterpm = WFOSFocalPlane2Detector('Red_Low_Spot_Data_2020_150.txt',20,20,150)
+    
+    outxf = save[:,0]
+    outyf = save[:,1]
+    outlam = save[:,2]
+    outxc = save[:,3]/0.015
+    outyc = save[:,4]/0.015
+    outraysthru = save[:,5]
+    
+    #uhhhh
+    outc1 = fpinterp.interp(outxf, outyf, outlam)
+    
+    outc2 = fpinterp.invinterp(outc1[:,0], outc1[:,1], outyf)
+      
+    plt.scatter(outc2[:,0] - outxf, outc2[:,1] - outlam, s = 2)
+    plt.title('Accuracy of Interp > Inv Interp > ?')
+    plt.xlabel('XF (pixels)')
+    plt.ylabel('Wavelength (microns)')
+    
+    """
+    #data & plot
+    plt.xlabel('XF (pixels)')
+    plt.ylabel('Wavelength (microns)')
+
+    outc = fpinterp.invinterp(outxc, outyc, outyf)
+    plt.scatter(outc[:,0], outc[:,1], c = 'r', s = 2)
+    plt.scatter(outxf, outlam, c = 'k', s = 2)
+    """
+def example():
+    plt.close('all')
+    plt.figure()
+    plt.title('1D Interpolation Example')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    
+    ax = np.arange(0,20,0.1)
+
+    x = np.linspace(0, 20, num=25)
+    y = np.sin(x)
+    f = interpolate.interp1d(x, y)
+
+    xnew = np.linspace(0, 20, num=41, endpoint=True)
+
+    plt.plot(ax, np.sin(ax), '-',c='k')
+    plt.plot(x, y, 'o', c='purple')
+    plt.plot(xnew, f(xnew), '--',c='purple')
+    plt.show()
+
 #need to pick which function you want to run here
 #note: older tests are located in "old functions.py"
 if __name__ == '__main__':
-    testraysthru()
+    example()
 
   
