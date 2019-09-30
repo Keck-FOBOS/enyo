@@ -46,6 +46,8 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
     """
     dw = numpy.diff(numpy.log(wave))/numpy.log(base) if log else numpy.diff(wave)
     if numpy.any( numpy.absolute(numpy.diff(dw)) > 100*numpy.finfo(dw.dtype).eps):
+        from IPython import embed
+        embed()
         raise ValueError('Wavelength vector is not uniformly sampled to numerical accuracy.')
     return numpy.mean(dw)
 
@@ -311,6 +313,17 @@ class Spectrum:
         r = Resample(self.flux, x=self.wave, inLog=self.log, newRange=rng, newpix=wave.size,
                      newLog=log)
         return Spectrum(r.outx, r.outy, log=log)
+
+    def redshift(self, z):
+        """
+        Redshift the spectrum.
+
+        Spectrum is in 1e-17 erg/s/cm^2/angstrom, so this shifts the
+        wavelength vector by 1+z and rescales the flux by 1+z to keep
+        the flux per *observed* wavelength.  S/N is kept fixed.
+        """
+        self.interpolator.x *= (1+z)
+        self.rescale(1/(1+z))
 
 
 class EmissionLineSpectrum(Spectrum):

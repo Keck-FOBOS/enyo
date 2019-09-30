@@ -287,7 +287,7 @@ def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, 
                           'with default sampling and size.')
             onsky_source.make_map()
 
-    # Detector pixel scale
+    # Detector pixel scale in arcsec/pixel
     pixelscale = pixelsize/platescale
 
     # Assume the sampling of the source is provided with the maximum
@@ -298,14 +298,14 @@ def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, 
     # `sampling` is in arcsec per pixel
     sampling = pixelscale if onsky_source is None else min(onsky_source.sampling, pixelscale)
     oversample = int(pixelscale/sampling)+1 if sampling < pixelscale else 1
-    sampling /= oversample
+    sampling = pixelscale/oversample
 
     # Assume the size of the image properly samples the source.
     # Determine a map size that at least encompasses the input source
     # and the input aperture. The factor of 1.5 is ad hoc; could likely
     # be lower. `size` is in arcsec
     dx, dy = 1.5*numpy.diff(numpy.asarray(spec_aperture.bounds).reshape(2,-1), axis=0).ravel()
-    size = max(dx,dy) if onsky_source is None else max(onsky_source.size, dx, dy)
+    size = max(dx,dy) #if onsky_source is None else max(onsky_source.size, dx, dy)
 
     # TODO: Below alters `source` and `spec_kernel`. Should maybe
     # instead save the old sampling and size and then resample back to
@@ -336,9 +336,19 @@ def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, 
     return util.boxcar_average(mono_img, oversample) if oversample > 1 else mono_img
 
 
-def twod_spectrum(sky_spectrum, spec_aperture, spec_kernel, platescale, dispscale, pixelsize,
-                  source_distribution=None, source_spectrum=None, scramble=False, wave_lim=None):
+def twod_spectrum(sky_spectrum, spec_aperture, spec_kernel, platescale, linear_dispersion,
+                  pixelsize, source_distribution=None, source_spectrum=None, thresh=None,
+                  scramble=False, wave_lim=None, field_coo=None, opticalmodel=None):
+    """
+    if optical model is not provided:
+        - ignore field_coo
+        - return rectilinear 2D spectrum
 
+    platescale is in mm/arcsec
+    linear_dispersion is in A/mm
+    pixelsize is in mm
+
+    """
     # Ensure that the sky spectrum and source spectrum will have the same wavelength limits
     if source_spectrum is not None and wave_lim is None:
         wave_lim = source_spectrum.wave[[0,-1]]
@@ -351,28 +361,55 @@ def twod_spectrum(sky_spectrum, spec_aperture, spec_kernel, platescale, dispscal
     # Renormalize the sky slit image such that the integral is the area of the aperture.
     sky_img *= spec_aperture.area / numpy.sum(sky_img)/numpy.square(sky.sampling)
 
+    source_img = None
+    if source_distribution is not None and source_spectrum is not None:
+        # Reset the source distribution map
+        source_distribution.reset_map()
+
+        # Get the source-only monochromatic image
+        sky = source.OnSkyConstant(0.0)
+        source_img = monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize,
+                                         onsky_source=source_distribution, scramble=scramble)
+        # Renormalize the source image by the integral of the onsky-source;
+        # this maintains the effects of aperture losses
+        source_img /= source_distribution.integral
+
+    s = numpy.array([0,0])
+    e = numpy.array([*sky_img.shape])
+    if thresh is not None:
+        indx = sky_img > thresh
+        s, e = numpy.append(numpy.where(numpy.any(indx, axis=1))[0][[0,-1]],
+                            numpy.where(numpy.any(indx, axis=0))[0][[0,-1]]).reshape(2,2).T
+        if source_img is not None:
+            indx = source_img > thresh
+            _s, _e = numpy.append(numpy.where(numpy.any(indx, axis=1))[0][[0,-1]],
+                                  numpy.where(numpy.any(indx, axis=0))[0][[0,-1]]).reshape(2,2).T
+            s = numpy.minimum(s, _s)
+            e = numpy.maximum(e, _e)
+
+    sky_img = sky_img[s[0]:e[0],s[1]:e[1]]
+    if source_img is not None:
+        source_img = source_img[s[0]:e[0],s[1]:e[1]]
+
     # Get the 2D spectrum
-    sky_2d_spec = rectilinear_twod_spectrum(sky_spectrum, sky_img, dispscale, wave_lim=wave_lim)
+    dispscale = linear_dispersion*pixelsize
+    wave0, sky_2d_spec = rectilinear_twod_spectrum(sky_spectrum, sky_img, dispscale,
+                                                   wave_lim=wave_lim)
 
     if source_distribution is None or source_spectrum is None:
-        return sky_2d_spec
-
-    # Reset the source distribution map
-    source_distribution.reset_map()
-
-    # Get the source-only monochromatic image
-    sky = source.OnSkyConstant(0.0)
-    source_img = monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize,
-                                     onsky_source=source_distribution, scramble=scramble)
-    # Renormalize the source image by the integral of the onsky-source;
-    # this maintains the effects of aperture losses
-    source_img /= source_distribution.integral
+        return sky_2d_spec if opticalmodel is None \
+                    else opticalmodel.project_2d_spectrum(sky_2d_spec, platescale,
+                                                          linear_dispersion, pixelsize, wave0,
+                                                          field_coo=field_coo)
 
     # Get the 2D spectrum
-    source_2d_spec = rectilinear_twod_spectrum(source_spectrum, source_img, dispscale,
-                                               wave_lim=wave_lim)
+    wave0, source_2d_spec = rectilinear_twod_spectrum(source_spectrum, source_img, dispscale,
+                                                      wave_lim=wave_lim)
 
-    return sky_2d_spec + source_2d_spec
+    return sky_2d_spec + source_2d_spec if opticalmodel is None \
+                    else opticalmodel.project_2d_spectrum(sky_2d_spec + source_2d_spec, platescale,
+                                                          linear_dispersion, pixelsize, wave0,
+                                                          field_coo=field_coo)
 
 #def rectilinear_twod_spectrum(spectrum, aperture_image, dispscale, wave_lim=None, oversample=1):
 #    """
@@ -433,6 +470,10 @@ def rectilinear_twod_spectrum(spectrum, aperture_image, dispscale, wave_lim=None
     spectral dimension of aperture_image is along the first axis
 
     aperture_image has to be odd?
+    dispscale is A/pixel
+
+    remove rows columns with no pixels above thresh
+
     """
 
     # TODO: Let dispersion scale be non-linear?
@@ -444,22 +485,23 @@ def rectilinear_twod_spectrum(spectrum, aperture_image, dispscale, wave_lim=None
     resamp_wave = numpy.arange(wave_lim[0], wave_lim[1] + dispscale/oversample,
                                dispscale/oversample)
     resampled_spectrum = spectrum.resample(resamp_wave)
+    wave0 = numpy.mean(resampled_spectrum.wave[:oversample])
 #    pyplot.plot(spectrum.wave, spectrum.flux)
 #    pyplot.plot(resampled_spectrum.wave, resampled_spectrum.flux)
 #    pyplot.show()
 
     # Oversample the image spectrally
     _aperture_image = util.block_replicate(aperture_image, (oversample,1)) \
-                            if oversample > 1 else aperture_image
+                            if oversample > 1 else aperture_image.copy()
 
     # Number of spectral and spatial channels in the aperture image;
     # number of convolution kernels is nspat
-    nspec, nspat = _aperture_image.shape
+    nspat, nspec = _aperture_image.shape
 
     twodspec = numpy.zeros((len(resampled_spectrum),nspat), dtype=float)
     for i in range(nspat):
         twodspec[:,i] = signal.fftconvolve(resampled_spectrum.flux, _aperture_image[i],
                                            mode='same')
-
-    return util.block_average(twodspec, (oversample,1)) if oversample > 1 else twodspec
+    
+    return wave0, (util.block_average(twodspec, (oversample,1)) if oversample > 1 else twodspec)
 

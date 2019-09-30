@@ -7,7 +7,7 @@ Detector class
 import os
 import numpy
 
-from . import telescopes, observe, kernel, detector, efficiency
+from . import telescopes, observe, kernel, detector, efficiency, optical
 
 #class Spectrograph:
 #    """
@@ -28,7 +28,7 @@ class SpectrographArm:
     Base class for a spectrograph arm.
     """
     def __init__(self, platescale, cwl, dispersion, spectral_range, arm_detector, arm_kernel,
-                 throughput, scramble=False):
+                 throughput, opticalmodel, scramble=False):
         self.platescale = platescale            # focal-plane plate scale in mm/arcsec
         self.cwl = cwl                          # central wavelength in angstroms
         self.dispersion = dispersion            # linear dispersion in A/mm
@@ -38,6 +38,8 @@ class SpectrographArm:
         self.throughput = throughput            # Should describe the throughput from the focal
                                                 # plane to the detector, including detector QE;
                                                 # see `SpectrographThroughput`
+        self.opticalmodel = opticalmodel        # Optical model used to propagate rays from the
+                                                # focal plane to the camera detector
         self.scramble = scramble                # Does the source image get scrambled by the
                                                 # entrance aperture?
 
@@ -59,11 +61,14 @@ class SpectrographArm:
                                            scramble=self.scramble)
 
     def twod_spectrum(self, sky_spectrum, spec_aperture, source_distribution=None,
-                      source_spectrum=None, wave_lim=None):
+                      source_spectrum=None, wave_lim=None, field_coo=None, rectilinear=False):
+        optical_args = {} if rectilinear \
+                            else {'field_coo': field_coo, 'opticalmodel':self.opticalmodel}
         return observe.twod_spectrum(sky_spectrum, spec_aperture, self.kernel, self.platescale,
-                                     self.dispscale, self.detector.pixelsize,
+                                     self.dispersion, self.detector.pixelsize,
                                      source_distribution=source_distribution,
-                                     source_spectrum=source_spectrum, wave_lim=wave_lim)
+                                     source_spectrum=source_spectrum, thresh=1e-10,
+                                     wave_lim=wave_lim, **optical_args)
 
     def observe(sky, sky_spectrum, spec_aperture, exposure_time, airmass, onsky_source=None,
                 source_spectrum=None, extraction=None):
@@ -99,12 +104,14 @@ class TMTWFOSBlue(SpectrographArm):
         throughput = efficiency.SpectrographThroughput(detector=arm_detector,
                                                        other=pre_detector_eta)
 
+        opticalmodel = TMTWFOSBlueOpticalModel(setting=setting)
+
         if setting == 'lowres':
             #   Central wavelength is 4350 angstroms
             #   Linear dispersion is 13.3 angstroms per mm
             #   Free spectral range is 2500 angstroms
             super(TMTWFOSBlue, self).__init__(platescale, 4350., 13.3, 2500., arm_detector,
-                                              arm_kernel, throughput)
+                                              arm_kernel, throughput, opticalmodel)
 
     @staticmethod
     def valid_settings():
@@ -137,12 +144,14 @@ class TMTWFOSRed(SpectrographArm):
         throughput = efficiency.SpectrographThroughput(detector=arm_detector,
                                                        other=pre_detector_eta)
 
+        opticalmodel = TMTWFOSRedOpticalModel(setting=setting)
+
         if setting == 'lowres':
             #   Central wavelength is 7750 angstroms
             #   Linear dispersion is 23.7 angstroms per mm
             #   Free spectral range is 4500 angstroms
             super(TMTWFOSRed, self).__init__(platescale, 7750., 23.7, 4500., arm_detector,
-                                             arm_kernel, throughput)
+                                             arm_kernel, throughput, opticalmodel)
 
     @staticmethod
     def valid_settings():
@@ -170,7 +179,8 @@ class TMTWFOS:  #(MultiArmSpectrograph)
                          for key,a in self.arms.items()])
 
     def twod_spectrum(self, sky_spectrum, spec_aperture, source_distribution=None,
-                      source_spectrum=None, wave_lim=None, arm=None):
+                      source_spectrum=None, wave_lim=None, arm=None, field_coo=None,
+                      rectilinear=False):
         """
         Generate a 2D spectrum of the source through the aperture in
         one or more of the spectrograph arms.
@@ -178,10 +188,12 @@ class TMTWFOS:  #(MultiArmSpectrograph)
         if arm is not None:
             return self.arms[arm].twod_spectrum(sky_spectrum, spec_aperture,
                                                 source_distribution=source_distribution,
-                                                source_spectrum=source_spectrum, wave_lim=wave_lim)
+                                                source_spectrum=source_spectrum, wave_lim=wave_lim,
+                                                field_coo=field_coo, rectilinear=rectilinear)
         return dict([(key, a.twod_spectrum(sky_spectrum, spec_aperture,
                                            source_distribution=source_distribution,
-                                            source_spectrum=source_spectrum, wave_lim=wave_lim))
+                                            source_spectrum=source_spectrum, wave_lim=wave_lim,
+                                            field_coo=field_coo, rectilinear=rectilinear))
                          for key,a in self.arms.items()])
 
 #    def observe(self, source_distribution, source_spectrum, sky_distribution, sky_spectrum,
@@ -192,6 +204,36 @@ class TMTWFOS:  #(MultiArmSpectrograph)
 #        # TODO: sky_spectrum should default to Maunakea
 
 
+class TMTWFOSBlueOpticalModel(optical.OpticalModelInterpolator):
+    def __init__(self, setting='lowres'):
+        if setting == 'lowres':
+            modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos',
+                                     'Blue_Low_Spot_Data_2020_150.txt')
+        else:
+            raise NotImplementedError('Setting {0} not yet recognized.'.format(setting))
+        xf, yf, wave, xc, yc, rays = numpy.genfromtxt(modelfile).T
+        indx = rays > 0
+        # Convert field coordinates from arcmin to arcsec, wavelengths
+        # from micron to angstroms, and percentage of incident rays to
+        # a fraction
+        super(TMTWFOSBlueOpticalModel, self).__init__(60*xf[indx], 60*yf[indx], 10000*wave[indx],
+                                                      xc[indx], yc[indx], vignette=0.01*rays[indx])
+
+
+class TMTWFOSRedOpticalModel(optical.OpticalModelInterpolator):
+    def __init__(self, setting='lowres'):
+        if setting == 'lowres':
+            modelfile = os.path.join(os.environ['ENYO_DIR'], 'data', 'instr_models', 'wfos',
+                                     'Red_Low_Spot_Data_2020_150.txt')
+        else:
+            raise NotImplementedError('Setting {0} not yet recognized.'.format(setting))
+        xf, yf, wave, xc, yc, rays = numpy.genfromtxt(modelfile).T
+        indx = rays > 0
+        # Convert field coordinates from arcmin to arcsec, wavelengths
+        # from micron to angstroms, and percentage of incident rays to
+        # a fraction
+        super(TMTWFOSRedOpticalModel, self).__init__(60*xf[indx], 60*yf[indx], 10000*wave[indx],
+                                                     xc[indx], yc[indx], vignette=0.01*rays[indx])
 
 
 
