@@ -15,6 +15,7 @@ from matplotlib import pyplot
 
 #from mangadap.util.lineprofiles import FFTGaussianLSF
 from mangadap.util.lineprofiles import IntegratedGaussianLSF
+from .sampling import Resample
 
 def spectral_coordinate_step(wave, log=False, base=10.0):
     """
@@ -45,6 +46,8 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
     """
     dw = numpy.diff(numpy.log(wave))/numpy.log(base) if log else numpy.diff(wave)
     if numpy.any( numpy.absolute(numpy.diff(dw)) > 100*numpy.finfo(dw.dtype).eps):
+        from IPython import embed
+        embed()
         raise ValueError('Wavelength vector is not uniformly sampled to numerical accuracy.')
     return numpy.mean(dw)
 
@@ -156,6 +159,9 @@ class Spectrum:
         """
         return self.interpolator.y
 
+    def __len__(self):
+        return self.interpolator.x.size
+
     def __getitem__(self, s):
         """
         Access the flux data directly via slicing.
@@ -198,6 +204,8 @@ class Spectrum:
     def wavelength_step(self):
         """
         Return the wavelength step per pixel.
+
+        TODO: FIX THIS!!  It shouldn't use spectral_coordinate_step to get the mean dw.
         """
         # TODO: Lazy load and then keep this?
         dw = spectral_coordinate_step(self.wave, log=self.log)
@@ -280,6 +288,42 @@ class Spectrum:
     def show(self):
         pyplot.plot(self.wave, self.flux)
         pyplot.show()
+
+    def resample(self, wave, log=False):
+        """
+        Resample the spectrum to a new wavelength array.
+
+        Args:
+            wave (`numpy.ndarray`_):
+                New wavelength array. Must be linearly or
+                log-linearly sampled.
+            log (:obj:`bool`, optional):
+                Flag that the wavelength array is log-linearly
+                sampled.
+
+        Returns:
+            :class:`Spectrum`: Returns a a resampled version of
+            itself. TODO: The resampled version currently looses any
+            error or resolution vectors...
+        """
+        # TODO: Make this better!
+        rng = wave[[0,-1]]
+        if log:
+            rng = numpy.log10(rng)
+        r = Resample(self.flux, x=self.wave, inLog=self.log, newRange=rng, newpix=wave.size,
+                     newLog=log)
+        return Spectrum(r.outx, r.outy, log=log)
+
+    def redshift(self, z):
+        """
+        Redshift the spectrum.
+
+        Spectrum is in 1e-17 erg/s/cm^2/angstrom, so this shifts the
+        wavelength vector by 1+z and rescales the flux by 1+z to keep
+        the flux per *observed* wavelength.  S/N is kept fixed.
+        """
+        self.interpolator.x *= (1+z)
+        self.rescale(1/(1+z))
 
 
 class EmissionLineSpectrum(Spectrum):

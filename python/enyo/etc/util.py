@@ -41,4 +41,16 @@ def boxcar_average(arr, boxcar):
         _arr = numpy.add.reduceat(_arr, numpy.arange(0, _arr.shape[axis], box), axis=axis)/box
     return _arr
 
+def boxcar_replicate(arr, boxcar):
+    # Check and configure the input
+    _boxcar = (boxcar,)*arr.ndim if isinstance(boxcar, int) else boxcar
+    if not isinstance(_boxcar, tuple):
+        raise TypeError('Input `boxcar` must be an integer or a tuple.')
+    if len(_boxcar) != arr.ndim:
+        raise ValueError('Must provide an integer or tuple with one number per array dimension.')
 
+    # Perform the boxcar average over each axis and return the result
+    _arr = arr.copy()
+    for axis, box in zip(range(arr.ndim), _boxcar):
+        _arr = numpy.repeat(_arr, box, axis=axis)
+    return _arr
