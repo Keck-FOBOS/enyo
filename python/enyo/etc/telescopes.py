@@ -78,13 +78,12 @@ class Telescope:
         if obstruction is not None:
             self.area *= (1-obstruction)
 
-    def throughput(self, wave=None):
-        if not isinstance(self._throughput, efficiency.Efficiency):
-            # Just a float that is independent of wavelength
-            return self._throughput
-        if wave is None:
-            raise ValueError('Throughput is wavelength dependent; must specify `wave`.')
-        return self._throughput(wave)
+    @property
+    def throughput(self): #, wave=None):
+        if self._throughput is None:
+            # TODO: Should this really raise an error...
+            raise ValueError('Throughput not defined.')
+        return self._throughput
 
 
 class KeckTelescope(Telescope):

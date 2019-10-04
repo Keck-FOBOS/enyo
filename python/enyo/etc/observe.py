@@ -75,7 +75,7 @@ from scipy import signal
 
 from matplotlib import pyplot
 
-from . import source, efficiency, telescopes, spectrum, extract, aperture, util
+from . import source, efficiency, telescopes, spectrum, extract, aperture, util, detector
 
 class Observation:
     """
@@ -150,96 +150,114 @@ class Observation:
 
     if extraction is None, provide 2d result; otherwise return 1D extraction
 
+    per_resolution_element means apply a factor that converts the
+    signal from per angstrom to per resolution element
+
     """
-    def __init__(self, spec_aperture, spectrograph, exposure_time, atmospheric_throughput=None,
-                 airmass=None, onsky_source_distribution=None, source_spectrum=None,
-                 sky_spectrum=None, sky_distribution=None, extraction=None): 
-
-#                  system_throughput,
-#                 detector, exposure_time, extraction):
-
-#        # Rescale source spectrum to the input magnitude or surface
-#        # brightness
-#        print('band')
-#        self.band = efficiency.FilterResponse(band=self.normalizing_band)
-#        print('source rescale')
-#        self.source_spectrum.rescale_magnitude(self.band, self.magnitude 
-#                                if self.surface_brightness is None else self.surface_brightness)
+    def __init__(self, telescope, sky_spectrum, spec_aperture, exposure_time, detector,
+                 system_throughput=None, atmospheric_throughput=None, airmass=None,
+                 onsky_source_distribution=None, source_spectrum=None, extraction=None,
+                 per_resolution_element=False): 
 
         # Save the input or use defaults
         self.source = onsky_source_distribution
+
+        # Sky spectrum is expected to be independent of position within
+        # the aperture and be the sky flux density per unit area, where
+        # the unit area is defined by the aperture object (arcsec^2)
+        # i.e., the units are, e.g., erg/s/cm^2/angstrom/arcsec^2
+        self.source_spectrum = source_spectrum
+
+        # Match the sampling of the sky and source spectrum, if possible
+        self.sky_spectrum = sky_spectrum if self.source_spectrum is None else \
+                                spectrum.Spectrum(self.source_spectrum.wave,
+                                                  sky_spectrum.interp(self.source_spectrum.wave))
 
         # In the current implementation, the source spectrum is expected
         # to be:
         #   - independent of position within the source
         #   - the source flux density integrated over the full source
         #     distribution; i.e., units are, e.g., erg/s/cm^2/angstrom
-        self.wave = source_spectrum.wave.copy()
-        self.source_spectrum = source_spectrum
+        self.wave = self.sky_spectrum.wave.copy()
+        self.sres = self.sky_spectrum.sres.copy() if sky_spectrum.sres is not None \
+                        else (None if self.source_spectrum is None 
+                                else self.source_spectrum.sres.copy())
 
-        # Sky spectrum is expected to be independent of position within
-        # the aperture and be the sky flux density per unit area, where
-        # the unit area is defined by the aperture object (arcsec^2)
-        # i.e., the units are, e.g., erg/s/cm^2/angstrom/arcsec^2
-        self.sky_spectrum = spectrum.Spectrum(self.wave, sky_spectrum.interp(self.wave))
-
-        # Check that sky spectrum and source spectrum have the same
-        # length!
+        if per_resolution_element and self.sres is None:
+            raise ValueError('Cannot compute signal per resolution element because resolution '
+                             'is not available.')
 
         self.atmospheric_throughput = atmospheric_throughput
         self.telescope = telescope
-        # TODO: Allow for a list of apertures or a single aperture and a
-        # list of offsets.
-        self.aperture = focal_plane_aperture
-
+        self.aperture = spec_aperture
         self.system_throughput = system_throughput
         self.detector = detector
         self.exptime = exposure_time
         self.extraction = extraction
 
         # Get the "aperture efficiency"
-        self.aperture_efficiency = self.aperture.integrate_over_source(self.source) \
-                                        / self.source.integral
+        self.aperture_efficiency = 1.0 if self.source is None \
+                                     else self.aperture.integrate_over_source(self.source) \
+                                                / self.source.integral
 
         # Get the total object flux incident on the focal plane in
         # electrons per second per angstrom
-        _object_flux = self.source_spectrum.photon_flux() \
-                                * self.telescope.area \
-                                * self.atmospheric_throughput(self.wave) \
-                                * self.system_throughput(self.wave) \
-                                * self.aperture_efficiency \
-                                * self.detector.efficiency(self.wave)
+        _object_flux = numpy.zeros(self.wave.size, dtype=float) if self.source_spectrum is None \
+                            else self.source_spectrum.photon_flux(inplace=False) \
+                                    * self.telescope.area * self.aperture_efficiency \
+                                    * self.detector(self.wave)
+        if self.atmospheric_throughput is not None:
+            _object_flux *= self.atmospheric_throughput(self.wave)
+        if self.system_throughput is not None:
+            _object_flux *= self.system_throughput(self.wave)
 
         # Total sky flux in electrons per second per angstrom; the
         # provided sky spectrum is always assumed to be uniform over the
         # aperture
-        _sky_flux = self.sky_spectrum.photon_flux() * self.aperture.area \
-                                * self.telescope.area \
-                                * self.system_throughput(self.wave) \
-                                * self.detector.efficiency(self.wave)
+        _sky_flux = self.sky_spectrum.photon_flux(inplace=False) * self.aperture.area \
+                        * self.telescope.area * self.detector(self.wave)
+        if self.system_throughput is not None:
+            _sky_flux *= self.system_throughput(self.wave)
+
+        # Convert flux to per resolution element instead of per angstrom
+        if per_resolution_element and self.sres is not None:
+            _object_flux *= self.wave / self.sres
+            _sky_flux *= self.wave / self.sres
 
         # Observe and extract the source
-        self.total_flux, self.sky_flux, self.shot_variance, self.read_variance \
-                = self.extraction.sum_signal_and_noise(_object_flux, _sky_flux, self.exptime,
-                                                       wave=self.wave)
+        # TODO: Set spectral_pixels...
+        self.object_flux, self.obj_shot_var, self.sky_flux, self.sky_shot_var, self.read_var \
+                = self.extraction.sum_signal_and_noise(_object_flux, _sky_flux, self.exptime)
 
-    def simulate(self):
+    def simulate(self, sky_only=False):
         """
         Return a simulated spectrum
         """
-        # Draw from a Poisson distribution for the shot noise
-        shot_draw = numpy.random.poisson(lam=self.shot_variance)
-        # Draw from a Gaussian distribution for the read noise
-        read_draw = numpy.random.normal(scale=numpy.sqrt(self.read_variance))
-        return spectrum.Spectrum(self.wave,
-                                 self.total_flux - self.sky_flux + shot_draw + read_draw,
-                                 error=numpy.sqrt(self.shot_variance + self.read_variance),
-                                 log=self.detector.log)
+        if sky_only:
+            shot_var = self.sky_shot_var
+            flux = self.sky_flux
+        else:
+            shot_var = self.obj_shot_var + self.sky_shot_var
+            flux = self.object_flux + self.sky_flux
 
-    def snr(self):
-        return spectrum.Spectrum(self.wave,
-                                 (self.total_flux - self.sky_flux)
-                                        / numpy.sqrt(self.shot_variance + self.read_variance))
+        # Draw from a Poisson distribution for the shot noise
+        shot_draw = numpy.random.poisson(lam=shot_var)
+        # Draw from a Gaussian distribution for the read noise
+        read_draw = numpy.random.normal(scale=numpy.sqrt(self.read_var))
+        return spectrum.Spectrum(self.wave, flux + shot_draw + read_draw,
+                                 error=numpy.sqrt(shot_var + self.read_var),
+                                 log=self.sky_spectrum.log if self.source_spectrum is None
+                                         else self.source_spectrum.log)
+
+    def snr(self, sky_sub=False):
+        flux = self.object_flux
+        var = self.obj_shot_var + self.sky_shot_var + self.read_var
+        if not sky_sub:
+            flux += self.sky_flux
+        # TODO: add additional noise from sky subtraction
+        return spectrum.Spectrum(self.wave, flux / numpy.sqrt(var),
+                                 log=self.sky_spectrum.log if self.source_spectrum is None
+                                         else self.source_spectrum.log)
 
 
 def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, onsky_source=None,
