@@ -13,8 +13,7 @@ import astropy.units
 
 from matplotlib import pyplot
 
-#from mangadap.util.lineprofiles import FFTGaussianLSF
-from mangadap.util.lineprofiles import IntegratedGaussianLSF
+from ..util.lineprofiles import IntegratedGaussianLSF
 from .sampling import Resample
 
 def spectral_coordinate_step(wave, log=False, base=10.0):
@@ -46,8 +45,6 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
     """
     dw = numpy.diff(numpy.log(wave))/numpy.log(base) if log else numpy.diff(wave)
     if numpy.any( numpy.absolute(numpy.diff(dw)) > 100*numpy.finfo(dw.dtype).eps):
-        from IPython import embed
-        embed()
         raise ValueError('Wavelength vector is not uniformly sampled to numerical accuracy.')
     return numpy.mean(dw)
 
@@ -118,10 +115,10 @@ class Spectrum:
     erg/s/cm^2/angstrom.
 
     .. todo::
-        - include inverse variance
         - include mask
         - incorporate astropy units?
         - keep track of units
+        - allow wavelength vector to be irregularly gridded
 
     Args:
         wave (array-like):
@@ -129,19 +126,36 @@ class Spectrum:
             linearly or geometrically.
         flux (array-like):
             1D flux data in 1e-17 erg/s/cm^2/angstrom.
-        resolution (array-like, optional):
+        resolution (float, array-like, optional):
             1D spectral resolution (:math:`$R=\lambda/\Delta\lambda$`)
         log (:obj:`bool`, optional):
             Spectrum is sampled in steps of log base 10.
     """
     def __init__(self, wave, flux, error=None, resolution=None, log=False):
-        if resolution is not None and len(flux) != len(resolution):
-            raise ValueError('Resolution vector must match length of flux vector.')
-        self.interpolator = interpolate.interp1d(wave, flux, assume_sorted=True)
-        self.error = error
-        self.sres = resolution
-        self.log = log
+        # Check the input
+        _wave = numpy.atleast_1d(wave)
+        _flux = numpy.atleast_1d(flux)
+        if _wave.ndim != 1:
+            raise ValueError('Spectrum can only accommodate single vectors for now.')
+        if _wave.shape != _flux.shape:
+            raise ValueError('Wavelength and flux vectors do not match.')
+
+        self.sres = None if resolution is None else numpy.atleast_1d(resolution)
+        if self.sres is not None:
+            # Allow resolution to be a single value
+            if self.sres.size == 1:
+                self.sres = numpy.repeat(self.sres, _flux.size)
+            if self.sres.shape != _flux.shape:
+                raise ValueError('Resolution vector must match length of flux vector.')
+            
+        self.error = None if error is None else numpy.atleast_1d(error)
+        if self.error is not None and self.error.shape != _flux.shape:
+            raise ValueError('Error vector must match length of flux vector.')
+            
+        self.interpolator = interpolate.interp1d(_wave, _flux, assume_sorted=True)
+        self.size = _wave.size
         # TODO: Check log against the input wavelength vector
+        self.log = log
         self.nu = self._frequency()
         self.fnu = None
 
@@ -158,6 +172,102 @@ class Spectrum:
         The flux data vector.
         """
         return self.interpolator.y
+
+    def copy(self):
+        return Spectrum(self.wave.copy(), self.flux.copy(),
+                        error=None if self.error is None else self.error.copy(),
+                        resolution=None if self.sres is None else self.sres.copy(), log=self.log)
+
+    def _arith(self, other, func):
+        if isinstance(other, Spectrum):
+            return func(other)
+
+        _other = numpy.atleast_1d(other)
+        if _other.size == 1:
+            _other = numpy.repeat(_other, self.size)
+        if _other.size != self.size:
+            raise ValueError('Vector to add has incorrect length.')
+        return func(Spectrum(self.interpolator.x, _other))
+
+    def __add__(self, rhs):
+        return self._arith(rhs, self._add_spectrum)
+
+    def __radd__(self, lhs):
+        return self + lhs
+
+    def __sub__(self, rhs):
+        return self + rhs*-1
+
+    def __rsub__(self, lhs):
+        return self*-1 + lhs
+
+    def __mul__(self, rhs):
+        return self._arith(rhs, self._mul_spectrum)
+
+    def __rmul__(self, lhs):
+        return self * lhs
+
+    def __truediv__(self, rhs):
+        if isinstance(rhs, Spectrum):
+            return self * rhs.inverse()
+        # NOTE: Parentheses are important below because they force the
+        # call to __mul__ for the correct quantity and avoid an
+        # infinite loop!
+        return self * (1/float(rhs))
+
+    def __rtruediv__(self, lhs):
+        return self.inverse() * lhs
+
+    def inverse(self):
+        error = None if self.error is None else self.error/numpy.square(self.interpolator.y)
+        return Spectrum(self.wave, 1./self.interpolator.y, error=error, resolution=self.sres,
+                        log=self.log)
+
+    def _mul_spectrum(self, rhs):
+        """
+        rhs must have type Spectrum
+        """
+        if not numpy.array_equal(rhs.wave, self.wave):
+            raise NotImplementedError('To perform arithmetic on spectra, their wavelength arrays '
+                                      'must be identical.')
+        flux = self.flux * rhs.flux
+        if self.error is None and rhs.error is None:
+            error = None
+        else:
+            error = numpy.zeros(self.size, dtype=float)
+            if self.error is not None:
+                error += numpy.square(self.error/self.flux)
+            if rhs.error is not None:
+                error += numpy.square(rhs.error/rhs.flux)
+            error = numpy.sqrt(error) * numpy.absolute(flux)
+        if self.sres is not None and rhs.sres is not None \
+                and not numpy.array_equal(self.sres, rhs.sres):
+            warnings.warn('Spectral resolution is not correctly propagated.')
+        sres = self.sres if self.sres is not None else rhs.sres
+        return Spectrum(self.wave, flux, error=error, resolution=sres, log=self.log)
+
+    def _add_spectrum(self, rhs):
+        """
+        rhs must have type Spectrum
+        """
+        if not numpy.array_equal(rhs.wave, self.wave):
+            raise NotImplementedError('To perform arithmetic on spectra, their wavelength arrays '
+                                      'must be identical.')
+        flux = self.flux + rhs.flux
+        if self.error is None and rhs.error is None:
+            error = None
+        else:
+            error = numpy.zeros(self.size, dtype=float)
+            if self.error is not None:
+                error += numpy.square(self.error)
+            if rhs.error is not None:
+                error += numpy.square(rhs.error)
+            error = numpy.sqrt(error)
+        if self.sres is not None and rhs.sres is not None \
+                and not numpy.array_equal(self.sres, rhs.sres):
+            warnings.warn('Spectral resolution is not correctly propagated.')
+        sres = self.sres if self.sres is not None else rhs.sres
+        return Spectrum(self.wave, flux, error=error, resolution=sres, log=self.log)
 
     def __len__(self):
         return self.interpolator.x.size
@@ -273,21 +383,26 @@ class Spectrum:
             return self.rescale(numpy.power(10., -dmag/2.5))
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
-    def photon_flux(self):
+    def photon_flux(self, inplace=True):
         r"""
         Convert the spectrum from 1e-17 erg/s/cm^2/angstrom to
         photons/s/cm^2/angstrom.
 
-        The spectral data are modified *in-place*; nothing is
+        If `inplace is True`, the spectrum is modified in place and
+        None is returned; otherwise the converted flux vector is
         returned.
         """
         ergs_per_photon = astropy.constants.h.to('erg s') * astropy.constants.c.to('angstrom/s') \
                             / (self.wave * astropy.units.angstrom)
-        return self.rescale(1e-17 / ergs_per_photon.value)
+        return self.rescale(1e-17 / ergs_per_photon.value) if inplace \
+                    else self.interpolator.y * 1e-17 / ergs_per_photon.value
 
-    def show(self):
-        pyplot.plot(self.wave, self.flux)
-        pyplot.show()
+    def plot(self, ax=None, show=False, **kwargs):
+        _ax = pyplot.subplot() if ax is None else ax
+        _ax.plot(self.wave, self.flux, **kwargs)
+        if show:
+            pyplot.show()
+        return _ax
 
     def resample(self, wave, log=False):
         """
@@ -352,9 +467,10 @@ class EmissionLineSpectrum(Spectrum):
             observed with determined by that quadrature sum of the
             intrinsic and instrumental widths.  If the resolution vector
             is not provided, the line simply has the provided FWHM.
-        units (:obj:`str`, optional):
-            The units of the provided FWHM data.  Must be either 'km/s'
-            or 'ang'.
+        units (:obj:`str`, array-like, optional):
+            The units of the provided FWHM data. Must be either
+            'km/s' or 'ang'. Can be a single string or an array with
+            the units for each provided value.
         redshift (scalar-like, optional):
             If provided, the emission-line wavelengths are redshifted.
         continuum (array-like, optional):
@@ -366,54 +482,62 @@ class EmissionLineSpectrum(Spectrum):
         log (:obj:`bool`, optional):
             Spectrum is sampled in steps of log base 10.
     """
-    def __init__(self, wave, flux, restwave, fwhm, units='ang', redshift=None, continuum=None,
+    def __init__(self, wave, flux, restwave, fwhm, units='ang', redshift=0.0, continuum=None,
                  resolution=None, log=False):
+
+        _flux = numpy.atleast_1d(flux).ravel()
+        nlines = _flux.size
+        _restwave = numpy.atleast_1d(restwave).ravel()
+        if _restwave.size != nlines:
+            raise ValueError('Number of rest wavelengths does not match the number of fluxes.')
+        _fwhm = numpy.atleast_1d(fwhm).ravel()
+        if _fwhm.size != nlines:
+            raise ValueError('Number of FWHM values does not match the number of fluxes.')
+        _units = numpy.atleast_1d(units).ravel()
         # Check the input
-        if units not in ['km/s', 'ang']:
+        if not numpy.all(numpy.isin(_units, ['km/s', 'ang'])):
             raise ValueError('FWHM units must be \'km/s\' or \'ang\'.')
+        if _units.size == 1:
+            _units = numpy.repeat(_units, _flux.size)
+        if _units.size != nlines:
+            raise ValueError('Number of unit values does not match the number of fluxes.')
+
         if resolution is not None and hasattr(resolution, '__len__') \
                 and len(wave) != len(resolution):
             raise ValueError('Resolution vector must match length of wavelength vector.')
         if continuum is not None and len(wave) != len(continuum):
             raise ValueError('Continuum vector must match length of wavelength vector.')
 
-        # Apply the redsift
-        z = 0.0 if redshift is None else redshift
-
         # Set the line parameters
-        _flux = numpy.asarray([flux]).ravel()
-        _linewave = numpy.asarray([restwave]).ravel()*(1+z)
-        sig2fwhm = numpy.sqrt(8.0 * numpy.log(2.0))
-        sigma = numpy.asarray([fwhm]).ravel()/sig2fwhm
-        nlines = len(_flux)
-
+        _linewave = _restwave*(1+redshift)
         indx = (_linewave > wave[0]) & (_linewave < wave[-1])
         if not numpy.any(indx):
             raise ValueError('Redshifted lines are all outside of the provided wavelength range.')
 
-        # Check for consistency
-        if len(_linewave) != nlines:
-            raise ValueError('Number of line rest wavelengths must match number of line fluxes.')
-        if len(sigma) != nlines:
-            raise ValueError('Number of line FWHMs must match number of line fluxes.')
-
+        sig2fwhm = numpy.sqrt(8.0 * numpy.log(2.0))
+        sigma = _fwhm/sig2fwhm
         # Convert the FWHM as needed based on the sampling and units
-        if log and units == 'ang':
+        in_ang = _units == 'ang'
+        in_kms = _units == 'km/s'
+        if log and numpy.any(in_ang):
             # Convert to km/s
-            sigma = astropy.constants.c.to('km/s').value*sigma/_linewave
-        elif not log and units == 'km/s':
+            sigma[in_ang] = astropy.constants.c.to('km/s').value*sigma[in_ang]/_linewave[in_ang]
+        elif not log and numpy.any(in_kms):
             # Convert to angstroms
-            sigma = _linewave*sigma/astropy.constants.c.to('km/s').value
+            sigma[in_kms] = _linewave[in_kms]*sigma[in_kms]/astropy.constants.c.to('km/s').value
 
-        # Include resolution if provided
-        if resolution is not None:
+        # Add the instrumental resolution in quadrature to the
+        # intrinsic width, if the resolution is provided
+        if resolution is None:
+            _resolution = None
+        else:
             _resolution = resolution if hasattr(resolution, '__len__') \
                                 else numpy.full_like(wave, resolution, dtype=float)
             sigma_inst = astropy.constants.c.to('km/s').value/_resolution/sig2fwhm if log else \
                             wave/_resolution/sig2fwhm
-            interp = interpolate.interp1d(wave, sigma_inst, assume_sorted=True)
-            sigma[indx] = numpy.sqrt(numpy.square(sigma[indx])
-                                        + numpy.square(interp(_linewave[indx])))
+            interp = interpolate.interp1d(wave, sigma_inst, assume_sorted=True, bounds_error=False,
+                                          fill_value=0.)
+            sigma = numpy.sqrt(numpy.square(sigma) + numpy.square(interp(_linewave))) 
 
         # Convert parameters to pixel units
         _dw = spectral_coordinate_step(wave, log=log)
@@ -431,7 +555,7 @@ class EmissionLineSpectrum(Spectrum):
         
         # Construct the emission-line spectrum
         pix = numpy.arange(wave.size)
-        spectrum = numpy.zeros(wave.size, dtype=float)
+        spectrum = numpy.zeros(wave.size, dtype=float) if continuum is None else continuum.copy()
         profile = IntegratedGaussianLSF()
         for i in range(nlines):
             if not indx[i]:
@@ -440,7 +564,7 @@ class EmissionLineSpectrum(Spectrum):
             spectrum += profile(pix, p)
 
         # Instantiate
-        super(EmissionLineSpectrum, self).__init__(wave, spectrum, log=log)
+        super(EmissionLineSpectrum, self).__init__(wave, spectrum, resolution=_resolution, log=log)
 
 
 # 8329-6104
@@ -491,9 +615,9 @@ class ABReferenceSpectrum(Spectrum):
     Inherits from :class:`Spectrum`, which we take to mean that the flux
     is always in units of 1e-17 erg/s/cm^2/angstrom.
     """
-    def __init__(self, wave, log=False):
+    def __init__(self, wave, resolution=None, log=False):
         norm = numpy.power(10., 29 - 48.6/2.5)  # Reference flux in microJanskys
         fnu = numpy.full_like(wave, norm, dtype=float)
         flambda = convert_flux_density(wave, fnu, density='Hz')
-        super(ABReferenceSpectrum, self).__init__(wave, flambda, log=log)
+        super(ABReferenceSpectrum, self).__init__(wave, flambda, resolution=resolution, log=log)
 

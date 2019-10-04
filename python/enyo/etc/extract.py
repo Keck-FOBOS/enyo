@@ -43,39 +43,48 @@ class Extraction:
         self.spectral_edges, self.spectral_profile \
                 = Extraction._pixelated_gaussian(self.spectral_fwhm, self.spectral_width)
 
+        # 2D profile? ...
 #        self.profile = self.spectral_profile[:,None]*self.spatial_profile[None,:]
 
-    def sum_signal_and_noise(self, object_flux, sky_flux, exposure_time, wave=None):
+    def sum_signal_and_noise(self, object_flux, sky_flux, exposure_time, spectral_pixels=3.):
         """
-        Get the signal and noise from a summed extraction.
+        Get the signal and noise from a summed extraction. NO SUMMING
+        IS DONE SPECTRALLY.
 
-        Fluxes should be in electrons per second per angstrom
+        Fluxes should be in electrons per second per resolution
+        element or per angstrom. Flux per second isn't explicitly
+        necessary for the calculation, but it allows for a
+        consistency with the dark current calculation.
 
-        object_flux and sky_flux can be spectra
+        object_flux and sky_flux can be spectra or individual values
 
-        returned fluxes and errors are in electrons
+        Returned fluxes and errors are in electrons per resolution
+        element or per angstrom.
+
+        The input spectra are not resampled. The signal and variance
+        are returned in such that the S/N is per resolution element.
+        The `pixels_per_resolution` is used to set the how many
+        pixels to use when accounting for read noise.
+
         """
-        if wave is None and self.detector.log:
-            raise ValueError('Must provide wavelength vector is detector has constant log step '
-                             'in wavelength.')
-
-        _dispscale = self.detector.dispscale*numpy.log(10)*wave if self.detector.log \
-                            else self.detector.dispscale
-        
-        sky = sky_flux*_dispscale*exposure_time
-        total = (object_flux + sky_flux)*_dispscale*exposure_time
-
         # Get the variance in each pixel
+        extract_box_n = len(self.spatial_profile) * spectral_pixels
+        read_var = numpy.square(self.detector.rn) * extract_box_n
         if isinstance(object_flux, numpy.ndarray):
-            shot_variance = numpy.sum((total[None,:]*self.spatial_profile[:,None] 
-                                        + self.detector.dark*exposure_time), axis=0)
-            read_variance = numpy.full_like(shot_variance,
-                                        numpy.square(self.detector.rn)*len(self.spatial_profile))
+            ext_obj_flux = numpy.sum(object_flux[None,:]*self.spatial_profile[:,None], axis=0) \
+                                * exposure_time
+            ext_sky_flux = numpy.sum(sky_flux[None,:]*self.spatial_profile[:,None], axis=0) \
+                                * exposure_time
+            read_var = numpy.full_like(ext_obj_flux, read_var, dtype=float)
         else:
-            shot_variance = numpy.sum(total_flux*self.spatial_profile + dark*exposure_time)
-            read_variance = numpy.square(self.detector.rn)*len(self.spatial_profile)
+            ext_obj_flux = numpy.sum(object_flux*self.spatial_profile) * exposure_time
+            ext_sky_flux = numpy.sum(sky_flux[None,:]*self.spatial_profile[:,None], axis=0) \
+                                * exposure_time
 
-        return total, sky, shot_variance, read_variance
+        obj_shot_var = ext_obj_flux + self.detector.dark * extract_box_n * exposure_time
+        sky_shot_var = ext_sky_flux + self.detector.dark * extract_box_n * exposure_time
+
+        return ext_obj_flux, obj_shot_var, ext_sky_flux, sky_shot_var, read_var
 
     # TODO: Add optimal_signal_and_noise()
 
@@ -102,7 +111,7 @@ class Extraction:
 #                numpy.sqrt(dark*n_pixels), detector.rn*numpy.sqrt(n_pixels)
     
     @property
-    def monochromatic_efficiency(self):
-        return numpy.sum(self.profile)
+    def spatial_efficiency(self):
+        return numpy.sum(self.spatial_profile)
 
 

@@ -2,202 +2,249 @@
 
 import os
 import time
+import warnings
+import argparse
+
+from IPython import embed
 
 import numpy
 
-from matplotlib import pyplot
+from matplotlib import pyplot, ticker
 
-from enyo.etc import source, efficiency, telescopes, spectrum, extract, aperture
+from enyo.etc import source, efficiency, telescopes, spectrum, extract, aperture, detector
 from enyo.etc.observe import Observation
 
-#-----------------------------------------------------------------------------
 
-#-----------------------------------------------------------------------------
+def parse_args(options=None):
 
-if __name__ == '__main__':
-    t = time.clock()
+    parser = argparse.ArgumentParser()
 
-    # Get the wavelength vector
-    wave0 = 3100
-    dlogw = 5e-5
-    waven = 10000
-    nwave = int((numpy.log10(waven)-numpy.log10(wave0))/dlogw + 1)
-    wave = numpy.power(10., numpy.arange(nwave)*dlogw + numpy.log10(wave0))
+    parser.add_argument('-w', '--wavelengths', default=[3100,10000,1e-5], nargs=3, type=float,
+                        help='Wavelength grid: start wave, approx end wave, logarithmic step.')
+    parser.add_argument('-m', '--mag', default=24., type=float,
+                        help='Object total apparent g-band magnitude.')
+    parser.add_argument('-z', '--redshift', default=0.0, type=float,
+                        help='Redshift of the object, z')
+    parser.add_argument('-e', '--emline', default=None, type=str,
+                        help='File with emission lines to add to the spectrum.')
+    parser.add_argument('-s', '--sersic', default=None, nargs=4, type=float,
+                        help='Use a Sersic profile to describe the object surface-brightness '
+                             'distribution; order must be effective radius, Sersic index, '
+                             'ellipticity (1-b/a), position angle (deg).')
+    parser.add_argument('-t', '--time', default=3600., type=float, help='Exposure time (s)')
+    parser.add_argument('-f', '--fwhm', default=0.65, type=float,
+                        help='On-sky PSF FWHM (arcsec)')
+    parser.add_argument('-a', '--airmass', default=1.0, type=float, help='Airmass')
+    parser.add_argument('-i', '--ipython', default=False, action='store_true',
+                        help='After completing the setup, embed in an IPython session.')
+    parser.add_argument('-p', '--plot', default=False, action='store_true',
+                        help='Provide a plot of the components of the calculation.')
+    parser.add_argument('-u', '--per_ang', default=False, action='store_true',
+                        help='Report the S/N per angstrom instead of per resolution element.')
 
-    redshift = 0.0
+    return parser.parse_args() if options is None else parser.parse_args(options)
 
-    spectrum_type = 'emline'
-    spectrum_type = 'blue'
-    # Flux in 1e-17 erg/s/cm^2
-    flux = numpy.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
-    # Line names
-    names = numpy.array(['Lya', '[OII]3727', '[OII]3729', 'Hb', '[OIII]4960', '[OIII]5008'])
-    # Wavelength in angstroms
-    restwave = numpy.array([ 1216., 3727.092, 3729.875, 4862.691, 4960.295, 5008.240])
-    # Line FWHM in km/s
-    fwhm = numpy.array([50., 50., 50., 50., 50., 50.])
-    # Source spectrum will be in 1e-17 erg/s/cm^2/angstrom
 
-    reff = 2.0
-    sersic_n = 1.0
-    ellipticity = 0.4
-    position_angle = 45
-    intrinsic = None          # If None, assumed to be point source
+def _emission_line_database_dtype():
+    return [('name', '<U20'),
+            ('flux', float),
+            ('restwave', float),
+            ('frame', '<U10'),
+            ('fwhm', float),
+            ('fwhmu', '<U10')]
 
-    seeing = 0.8
-    airmass = 1.0
 
-    fiber_diameter = 1.0
+def read_emission_line_database(dbfile):
+    return numpy.genfromtxt(dbfile, dtype=_emission_line_database_dtype())
 
+
+def get_wavelength_vector(start, end, logstep):
+    """
+    Get the wavelength vector
+    """
+    nwave = int((numpy.log10(end)-numpy.log10(start))/logstep + 1)
+    return numpy.power(10., numpy.arange(nwave)*logstep + numpy.log10(start))
+
+
+def get_spectrum(wave, mag, emline_db=None, redshift=0.0, resolution=3500):
+    """
+    """
+    spec = spectrum.ABReferenceSpectrum(wave, resolution=resolution, log=True)
+    g = efficiency.FilterResponse()
+    spec.rescale_magnitude(g, mag)
+    if emline_db is None:
+        return spec
+    spec = spectrum.EmissionLineSpectrum(wave, emline_db['flux'], emline_db['restwave'],
+                                         emline_db['fwhm'], units=emline_db['fwhmu'],
+                                         redshift=redshift, resolution=resolution, log=True,
+                                         continuum=spec.flux)
+    warnings.warn('Including emission lines, spectrum g-band magnitude changed '
+                  'from {0} to {1}.'.format(mag, spec.magnitude(g)))
+    return spec
+
+def main(args):
+
+    t = time.perf_counter()
+
+    # Constants:
+    resolution = 3500.      # lambda/dlambda
+    fiber_diameter = 0.8    # Arcsec
     throughput_curve = 'wfos'
+    rn = 2.5                            # Detector readnoise (e-)
+    dark = 0.0                          # Detector dark-current (e-/s)
 
-#    # Set constant delta lambda such that the resolution is 3500 at 5000 angstroms
-#    dispfwhm = 5000/3500
-#    resolution = wave/dispfwhm
-    # Set a constant FWHM sampling of the spectrum with a constant
-    # resolution
-    resolution = 3500
+    # Temporary numbers that assume a given spectrograph PSF and LSF.
+    # Assume 3 pixels per spectral and spatial FWHM.
+    spatial_fwhm = 3.0
+    spectral_fwhm = 3.0
 
-    # Detector stats
-    pixelscale = fiber_diameter / 3     # Set 3 pixels per fiber diameter
-    dispscale = dlogw                   # Set dispersion scale to match the spectrum
-    rn = 3.                             # Detector readnoise (e-)
-    dark = 0.                           # Detector dark-current (e-)
-    qe = 0.9                            # Detector quantum efficiency (e-/photon)
-
-    exposure_time = 3600
-
-    # Approximate what the spot looks like on the detector
-    spectral_fwhm = 1/resolution/dispscale      # Number of pixels per spectral FWHM
-    spatial_fwhm = fiber_diameter/pixelscale    # Number of pixels per spatial FWHM
-    
-    # Set the number of pixels in each direction for the spectral
-    # extraction
-    spectral_width = 1                  # Keep single pixel extraction spectrally
-    spatial_width = spatial_fwhm        # Extract 1 FWHM spatially
-
-    # Get source spectrum.  In the current implementation, the source
-    # spectrum is
-    #   - expected to be normalized by the total integral of the source
-    #     flux
-    #   - expected to be independent of position within the source
-    if spectrum_type == 'constant':
-        source_spectrum = spectrum.Spectrum(wave, numpy.ones_like(wave, dtype=float), log=True)
-    elif spectrum_type == 'blue':
-        source_spectrum = spectrum.BlueGalaxySpectrum(redshift=redshift)
-    elif spectrum_type == 'emline':
-        source_spectrum = spectrum.EmissionLineSpectrum(wave, flux, restwave, fwhm, units='km/s',
-                                                        redshift=redshift, resolution=resolution,
-                                                        log=True)
-#    source_spectrum.show()
+    # Get source spectrum in 1e-17 erg/s/cm^2/angstrom. Currently, the
+    # source spectrum is assumed to be
+    #   - normalized by the total integral of the source flux 
+    #   - independent of position within the source
+    wave = get_wavelength_vector(args.wavelengths[0], args.wavelengths[1], args.wavelengths[2])
+    emline_db = None if args.emline is None else read_emission_line_database(args.emline)
+    spec = get_spectrum(wave, args.mag, emline_db=emline_db, redshift=args.redshift,
+                        resolution=resolution)
 
     # Build the source surface brightness distribution with unity
-    # integral
-    if reff is not None and sersic_n is not None:
-        intrinsic = source.OnSkySersic(1.0, reff, sersic_n, ellipticity=ellipticity,
-                                       position_angle=position_angle, unity_integral=True)
-    # Force a point source
-    intrinsic = 1.
-        
+    # integral; intrinsic is set to 1 for a point source
+    intrinsic = 1. if args.sersic is None \
+                    else source.OnSkySersic(1.0, args.sersic[0], args.sersic[1],
+                                            ellipticity=args.sersic[2],
+                                            position_angle=args.sersic[3], unity_integral=True)
+
+    # Set the size of the map used to render the source
+    size = args.fwhm*5 if args.sersic is None else max(args.fwhm*5, args.sersic[0]*5)
+    sampling = args.fwhm/10 if args.sersic is None \
+                    else min(args.fwhm/10, args.sersic[0]/10/args.sersic[1])
+
+    # Check the rendering of the Sersic profile
+    if args.sersic is not None:
+        intrinsic.make_map(sampling=sampling, size=size)
+        r, theta = intrinsic.semi.polar(intrinsic.X, intrinsic.Y)
+        flux_ratio = 2 * numpy.sum(intrinsic.data[r < intrinsic.r_eff.value]) \
+                        * numpy.square(sampling) / intrinsic.get_integral()
+        if numpy.absolute(numpy.log10(flux_ratio)) > numpy.log10(1.05):
+            warnings.warn('Difference in expected vs. map-rendered flux is larger than '
+                          '5%: {0}%.'.format((flux_ratio-1)*100))
+
     # Construct the on-sky source distribution
-    onsky = source.OnSkySource(seeing, intrinsic, sampling=0.1, size=20)
+    onsky = source.OnSkySource(args.fwhm, intrinsic, sampling=sampling, size=size)
+
+    # Show the rendered source
+#    pyplot.imshow(onsky.data, origin='lower', interpolation='nearest')
+#    pyplot.show()
 
     # Get the sky spectrum
     sky_spectrum = spectrum.MaunakeaSkySpectrum()
-#    sky_spectrum.show()
+
+    # Overplot the source and sky spectrum
+#    ax = spec.plot()
+#    ax = sky_spectrum.plot(ax=ax, show=True)
 
     # Get the atmospheric throughput
-    atmospheric_throughput = efficiency.AtmosphericThroughput(airmass=airmass)
+    atmospheric_throughput = efficiency.AtmosphericThroughput(airmass=args.airmass)
 
-#    pyplot.plot(source_spectrum.wave, source_spectrum.flux)
-#    pyplot.plot(sky_spectrum.wave, sky_spectrum.flux)
-#    pyplot.plot(source_spectrum.wave, sky_spectrum.interp(source_spectrum.wave))
-#    pyplot.show()
-
-    # Telescope; mostly just used for aperture area for now
+    # Set the telescope. Defines the aperture area and throughput
+    # (nominally 3 aluminum reflections for Keck)
     telescope = telescopes.KeckTelescope()
 
     # Define the observing aperture; fiber diameter is in arcseconds,
-    # center is 0,0 to put the fiber on the target center
+    # center is 0,0 to put the fiber on the target center. "resolution"
+    # sets the resolution of the fiber rendering; it has nothing to do
+    # with spatial or spectral resolution of the instrument
     fiber = aperture.FiberAperture(0, 0, fiber_diameter, resolution=100)
 
-    # Get the full system (top of telescope) throughput
-    # - Spectrograph throughput
-    if throughput_curve == 'wfos':
-        data_file = os.path.join(os.environ['ENYO_DIR'], 'data/efficiency',
-                                 'fiber_wfos_throughput.db')
-        db = numpy.genfromtxt(data_file)
-        spectrograph_throughput = efficiency.SpectrographThroughput(db[:,0], total=db[:,3])
-    elif throughput_curve == 'desi':
-        data_file = os.path.join(os.environ['ENYO_DIR'], 'data/efficiency',
-                                 'desi_spectrograph_thru.txt')
-        db = numpy.genfromtxt(data_file)
-        spectrograph_throughput = efficiency.SpectrographThroughput(db[:,0], total=db[:,1])
-    else:
-        raise NotImplementedError('Spectrograph unknown: {0}'.format(throughput_curve))
-    
-    # Coating efficiency
-    coating_efficiency = efficiency.Efficiency.from_file(os.path.join(os.environ['ENYO_DIR'],
-                                                                      'data/efficiency',
-                                                                      'aluminum.db'))
-    
-    # System efficiency including 3 aluminum bounces
-    system_throughput = efficiency.SystemThroughput(source_spectrum.wave,
+    # Get the spectrograph throughput (circa June 2018; TODO: needs to
+    # be updated). Includes fibers + foreoptics + FRD + spectrograph +
+    # detector QE (not sure about ADC). Because this is the total
+    # throughput, define a generic efficiency object.
+    thru_db = numpy.genfromtxt(os.path.join(os.environ['ENYO_DIR'], 'data/efficiency',
+                               'fiber_wfos_throughput.db'))
+    spectrograph_throughput = efficiency.Efficiency(thru_db[:,3], wave=thru_db[:,0])
+
+    # System efficiency combines the spectrograph and the telescope
+    system_throughput = efficiency.SystemThroughput(wave=spec.wave,
                                                     spectrograph=spectrograph_throughput,
-                                                    surfaces=3, coating=coating_efficiency)
+                                                    telescope=telescope.throughput)
 
-    # Instantiate the detector
-    detector = efficiency.Detector(pixelscale=pixelscale, dispscale=dispscale, log=True,
-                                        rn=rn, dark=dark, qe=qe)
+    # Instantiate the detector; really just a container for the rn and
+    # dark current for now. QE is included in fiber_wfos_throughput.db
+    # file, so I set it to 1 here.
+    det = detector.Detector(rn=rn, dark=dark, qe=1.0)
 
-    # Extraction
-    extraction = extract.Extraction(detector, spatial_fwhm=spatial_fwhm,
-                                    spatial_width=spatial_width, spectral_fwhm=spectral_fwhm,
-                                    spectral_width=spectral_width)
+    # Extraction: makes simple assumptions about the detector PSF for
+    # each fiber spectrum and mimics a "perfect" extraction, including
+    # an assumption of no cross-talk between fibers. Ignore the
+    # "spectral extraction".
+    extraction = extract.Extraction(det, spatial_fwhm=spatial_fwhm, spatial_width=2*spatial_fwhm)
 
-    obs = Observation(onsky, source_spectrum, sky_spectrum, atmospheric_throughput, telescope,
-                      fiber, system_throughput, detector, exposure_time, extraction)
+    # Perform the observation
+    obs = Observation(telescope, sky_spectrum, fiber, args.time, det,
+                      system_throughput=system_throughput,
+                      atmospheric_throughput=atmospheric_throughput, airmass=args.airmass,
+                      onsky_source_distribution=onsky, source_spectrum=spec, extraction=extraction,
+                      per_resolution_element=not args.per_ang)
 
-    obs.simulate().show()
+    # Construct the S/N spectrum
+    snr = obs.snr(sky_sub=True)
 
-    obs.snr().show()
+    if args.ipython:
+        embed()
 
-    exit()
+    if args.plot:
+        w,h = pyplot.figaspect(1)
+        fig = pyplot.figure(figsize=(1.5*w,1.5*h))
 
+        ax = fig.add_axes([0.1, 0.5, 0.8, 0.4])
+        ax.set_xlim([wave[0], wave[-1]])
+        ax.minorticks_on()
+        ax.tick_params(which='major', length=8, direction='in', top=True, right=True)
+        ax.tick_params(which='minor', length=4, direction='in', top=True, right=True)
+        ax.grid(True, which='major', color='0.8', zorder=0, linestyle='-')
+        ax.xaxis.set_major_formatter(ticker.NullFormatter())
+        ax.set_yscale('log')
 
-    
+        ax = spec.plot(ax=ax, label='Object')
+        ax = sky_spectrum.plot(ax=ax, label='Sky')
+        ax.legend()
+        ax.text(-0.1, 0.5, r'Flux [10$^{-17}$ erg/s/cm$^2$/${\rm \AA}$]', ha='center', va='center',
+                transform=ax.transAxes, rotation='vertical')
+        
+        ax = fig.add_axes([0.1, 0.1, 0.8, 0.4])
+        ax.set_xlim([wave[0], wave[-1]])
+        ax.minorticks_on()
+        ax.tick_params(which='major', length=8, direction='in', top=True, right=True)
+        ax.tick_params(which='minor', length=4, direction='in', top=True, right=True)
+        ax.grid(True, which='major', color='0.8', zorder=0, linestyle='-')
 
+        ax = snr.plot(ax=ax)
 
-    # Get the object and sky flux in electrons
-    object_flux = source_spectrum.photon_flux() * self.exposure_time \
-                                * self.source_spectrum.wave/resolution * self.telescope.area \
-                                * self.atmospheric_extinction(self.source_spectrum.wave) \
-                                * self.system_throughput(self.source_spectrum.wave)
+        ax.text(0.5, -0.1, r'Wavelength [${\rm \AA}$]', ha='center', va='center',
+                transform=ax.transAxes)
+        ax.text(-0.1, 0.5, r'S/N per R element', ha='center', va='center',
+                transform=ax.transAxes, rotation='vertical')
 
+        pyplot.show()
 
-
-    
-    # Construct the spectrum
-
-
-    s = SNRSpectrum(20., 1.0, 0.8, 1.0, 5000, 1., 0., 0.9)
-
-    exit()
-
-    reff = 0.1
-    sersic_index = 1
-    spectrum_type = 'constant'
-    redshift = 0.0
-
-    seeing = 0.8
-
-    resolution = 5000       # lambda/delta lambda
-
-    normalizing_band = 'g'  # Band used to normalize the source spectrum
-    magnitude = 25          # AB magnitude of source
-    exposure_time = 1       # Exposure time in seconds
-
-    print('Elapsed time: {0} seconds'.format(time.clock() - t))
-
-
+    # Report
+    g = efficiency.FilterResponse()
+    r = efficiency.FilterResponse(band='r')
+    print('-'*70)
+    print('{0:^70}'.format('FOBOS S/N Calculation (v0.1)'))
+    print('-'*70)
+    print('Compute time: {0} seconds'.format(time.perf_counter() - t))
+    print('Object g- and r-band AB magnitude: {0:.1f} {1:.1f}'.format(
+                    spec.magnitude(g), spec.magnitude(r)))
+    print('Sky g- and r-band AB surface brightness: {0:.1f} {1:.1f}'.format(
+                    sky_spectrum.magnitude(g), sky_spectrum.magnitude(r)))
+    print('Exposure time: {0:.1f} (s)'.format(args.time))
+    print('Aperture Loss: {0:.1f}%'.format((1-obs.aperture_efficiency)*100))
+    print('Extraction Loss: {0:.1f}%'.format((1-obs.extraction.spatial_efficiency)*100))
+    print('Median S/N per resolution element: {0:.1f}'.format(numpy.median(snr.flux)))
+    print('g-band weighted mean S/N per resolution element {0:.1f}'.format(
+                numpy.sum(g(snr.wave)*snr.flux)/numpy.sum(g(snr.wave))))
+    print('r-band weighted mean S/N per resolution element {0:.1f}'.format(
+                numpy.sum(r(snr.wave)*snr.flux)/numpy.sum(r(snr.wave))))
 

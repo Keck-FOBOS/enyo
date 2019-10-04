@@ -14,10 +14,10 @@ class Detector(Efficiency):
     Define the detector statistics.
 
     Args:
-        shape (:obj:`tuple`):
+        shape (:obj:`tuple`, optional):
             Dimensions of the detector in number of pixels along the
             spectral axis and number of pixels along the spatial
-            axis.
+            axis.  Can be None, but limits use if it is.
         pixelsize (:obj:`float`, optional):
             The size of the (square) detector pixels in *mm*.
         rn (:obj:`float`, optional):
@@ -37,9 +37,9 @@ class Detector(Efficiency):
     # TODO: Allow for multiple amplifiers per detector? Would also need
     # to define amplifier section.
     # TODO: Define overscan and data sections
-    def __init__(self, shape, pixelsize=0.015, rn=1., dark=0., gain=1., fullwell=1e4,
+    def __init__(self, shape=None, pixelsize=0.015, rn=1., dark=0., gain=1., fullwell=1e4,
                  nonlinear=1., qe=0.9):
-        if len(shape) != 2:
+        if shape is not None and len(shape) != 2:
             raise ValueError('Shape must contain two integers.')
         self.shape = shape
         self.pixelsize = pixelsize

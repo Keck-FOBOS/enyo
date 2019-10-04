@@ -75,9 +75,10 @@ class Efficiency:
     def __call__(self, wave):
         _wave = numpy.atleast_1d(wave)
         if self.interpolator is None:
-            return self._eta if _wave.size == 1 else numpy.full(wave.shape, self._eta, dtype=float)
-        _eta = self.interpolator(wave)
-        return _eta[0] if _wave.size == 1 else _eta
+            return self._eta if _wave.size == 1 \
+                        else numpy.full(_wave.shape, self._eta, dtype=float)
+        _eta = self.interpolator(_wave)
+        return _eta if hasattr(wave, '__len__') else _eta[0]
 
     def __getitem__(self, k):
         if self.interpolator is None:
@@ -235,7 +236,7 @@ class SpectrographThroughput(CombinedEfficiency):
     def __init__(self, wave=None, coupling=None, fibers=None, grating=None, camera=None,
                  detector=None, other=None):
         values = inspect.getargvalues(inspect.currentframe())
-        keys = numpy.array(values.args[1:])
+        keys = numpy.array(values.args[2:])
         objects = numpy.array([values.locals[key] for key in keys])
         indx = numpy.array([o is not None for o in objects])
         efficiencies = dict([(k,o) for k,o in zip(keys[indx], objects[indx])])
@@ -248,10 +249,9 @@ class SystemThroughput(CombinedEfficiency):
     """
     # TODO: Also allow for 'other' here?
     def __init__(self, wave=None, spectrograph=None, telescope=None):
-        args, _, _, values = inspect.getargvalues(inspect.currentframe())
-        # TODO: Only efficiencies that are not None, or set None values
-        # to unity efficiency?
-        indx = [v is None for v in list(values.items())[2:]]
-        efficiencies = dict([(k,values[k]) for k in args[2:][indx]])
-        super(SystemThroughput, self).__init__(efficiences, wave=wave)
-
+        values = inspect.getargvalues(inspect.currentframe())
+        keys = numpy.array(values.args[2:])
+        objects = numpy.array([values.locals[key] for key in keys])
+        indx = numpy.array([o is not None for o in objects])
+        efficiencies = dict([(k,o) for k,o in zip(keys[indx], objects[indx])])
+        super(SystemThroughput, self).__init__(efficiencies, wave=wave)

@@ -1,0 +1,30 @@
+# Example emission-lines file
+#      Name     Flux    Rest Wavelength     Frame   FWHM    Units
+        Lya     1.0     1215.6701           vac     50      km/s
+  [OII]3727     1.0     3727.092            vac     50      km/s
+  [OII]3729     1.0     3729.875            vac     50      km/s
+     Htheta     1.0     3798.9826           vac     50      km/s
+       Heta     1.0     3836.4790           vac     50      km/s
+[NeIII]3870     1.0     3869.86             vac     50      km/s
+    HeI3890     1.0     3889.749            vac     50      km/s
+      Hzeta     1.0     3890.1576           vac     50      km/s
+[NeIII]3969     1.0     3968.59             vac     50      km/s
+   Hepsilon     1.0     3971.2020           vac     50      km/s
+     Hdelta     1.0     4102.8991           vac     50      km/s
+     Hgamma     1.0     4341.691            vac     50      km/s
+       HeII     1.0     4687.015            vac     50      km/s
+      Hbeta     1.0     4862.691            vac     50      km/s
+ [OIII]4960     0.34    4960.295            vac     50      km/s
+ [OIII]5008     1.0     5008.240            vac     50      km/s
+   [NI]5199     1.0     5199.3490           vac     50      km/s
+   [NI]5201     1.0     5201.7055           vac     50      km/s
+    HeI5877     1.0     5877.243            vac     50      km/s
+   [OI]6302     1.0     6302.046            vac     50      km/s
+   [OI]6365     0.328   6365.535            vac     50      km/s
+  [NII]6550     0.327   6549.86             vac     50      km/s
+     Halpha     1.0     6564.632            vac     50      km/s
+  [NII]6585     1.0     6585.271            vac     50      km/s
+  [SII]6718     1.0     6718.294            vac     50      km/s
+  [SII]6733     1.0     6732.674            vac     50      km/s
+ [SIII]9071     1.0     9071.1              vac     50      km/s
+ [SIII]9053     1.0     9533.2              vac     50      km/s

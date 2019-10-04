@@ -10,6 +10,8 @@ from scipy import signal, special, interpolate
 
 from astropy.modeling import functional_models
 
+from ..util.frame import SemiMajorAxisCoo
+
 # TODO: Need to learn how to use abstract classes!  Inherit from
 # numpy.ndarray?
 class Source:
@@ -290,6 +292,9 @@ class OnSkySersic(functional_models.Sersic2D, Source):
                                           ellip=ellipticity,
                                           theta=numpy.radians(90-self.position_angle))
 
+        self.semi = SemiMajorAxisCoo(xc=self.x_0.value, yc=self.y_0.value, pa=self.position_angle,
+                                     ell=self.ellip.value)
+
         self.bn = None
         self.integral = self.get_integral()
         
@@ -328,6 +333,7 @@ class OnSkySersic(functional_models.Sersic2D, Source):
         arcseconds.  Currently :math:`3\ R_{\rm eff}`.
         """
         return self.r_eff*3
+
 
 # TODO: Add an input image distribution
 #class OnSkyImage:
