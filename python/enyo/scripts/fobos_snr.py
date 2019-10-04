@@ -89,7 +89,6 @@ def main(args):
     # Constants:
     resolution = 3500.      # lambda/dlambda
     fiber_diameter = 0.8    # Arcsec
-    throughput_curve = 'wfos'
     rn = 2.5                            # Detector readnoise (e-)
     dark = 0.0                          # Detector dark-current (e-/s)
 
