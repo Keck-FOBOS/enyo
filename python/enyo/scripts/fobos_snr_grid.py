@@ -163,16 +163,18 @@ def main(args):
 
     w,h = pyplot.figaspect(1)
     fig = pyplot.figure(figsize=(1.5*w,1.5*h))
-    ax = fig.add_axes([0.1, 0.2, 0.7, 0.7])
+    ax = fig.add_axes([0.15, 0.2, 0.7, 0.7])
     img = ax.imshow(snr_g, origin='lower', interpolation='nearest', extent=extent, aspect='auto',
                     norm=colors.LogNorm(vmin=snr_g.min(), vmax=snr_g.max()))
-    cax = fig.add_axes([0.81, 0.2, 0.02, 0.7])
+    cax = fig.add_axes([0.86, 0.2, 0.02, 0.7])
     pyplot.colorbar(img, cax=cax)
     cax.text(4, 0.5, snr_label, ha='center', va='center', transform=cax.transAxes,
              rotation='vertical')
     ax.text(0.5, -0.08, 'Exposure Time [s]', ha='center', va='center', transform=ax.transAxes)
-    ax.text(-0.12, 0.5, r'AB Magnitude [mag/arcsec$^2$]', ha='center', va='center',
+    ax.text(-0.12, 0.5, r'Surface Brightness [AB mag/arcsec$^2$]', ha='center', va='center',
             transform=ax.transAxes, rotation='vertical')
+    ax.text(0.5, 1.03, r'$g$-band S/N', ha='center', va='center', transform=ax.transAxes,
+            fontsize=12)
     pyplot.show()
 
     #embed()
