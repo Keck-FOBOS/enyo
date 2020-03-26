@@ -5,6 +5,9 @@ Spectrum utilities
 """
 
 import os
+
+from IPython import embed
+
 import numpy
 from scipy import interpolate
 from astropy.io import fits
@@ -49,6 +52,43 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
     return numpy.mean(dw)
 
 
+def angstroms_per_pixel(wave, log=False, base=10.0, regular=True):
+    """
+    Return a vector with the angstroms per pixel at each channel.
+
+    When `regular=True`, the function assumes that the wavelengths are
+    either sampled linearly or geometrically.  Otherwise, it calculates
+    the size of each pixel as the difference between the wavelength
+    coordinates.  The first and last pixels are assumed to have a width
+    as determined by assuming the coordinate is at its center.
+
+    .. note::
+
+        If the regular is False and log is True, the code does *not*
+        assume the wavelength coordinates are at the geometric center of
+        the pixel.
+
+    Args:
+        wave (`numpy.ndarray`_):
+            (Geometric) centers of the spectrum pixels in angstroms.
+        log (`numpy.ndarray`_, optional):
+            The vector is geometrically sampled.
+        base (:obj:`float`, optional):
+            Base of the logarithm used in the geometric sampling.
+        regular (:obj:`bool`, optional):
+            The vector is regularly sampled.
+
+    Returns:
+        numpy.ndarray: The angstroms per pixel.
+    """
+    if regular:
+        ang_per_pix = spectral_coordinate_step(wave, log=log, base=base)
+        return ang_per_pix*wave*numpy.log(base) if log else numpy.repeat(ang_per_pix, len(wave))
+
+    return numpy.diff([(3*wave[0]-wave[1])/2] + ((wave[1:] + wave[:-1])/2).tolist()
+                      + [(3*wave[-1]-wave[-2])/2])
+
+
 def convert_flux_density(wave, flux, density='ang'):
     r"""
     Convert a spectrum with flux per unit wavelength to per unit
@@ -61,17 +101,16 @@ def convert_flux_density(wave, flux, density='ang'):
         F_{\nu} = F_{\lambda} \frac{d\lambda}{d\nu} = F_{\lambda}
         \frac{\lambda^2}{c}.
 
-    The spectrum independent variable (`wave`) is always expected to be
-    the wavelength in angstroms.  The input/output units always expect
-    :math:`F_{\lambda}` in :math:`10^{-17}\ {\rm erg\ s}^{-1}\ {\rm
-    cm}^{-2}\ {\rm A}^{-1}` and :math:`F_{\nu}` in microjanskys
-    (:math:`10^{-29} {\rm erg\ s}^{-1}\ {\rm cm}^{-2}\ {\rm Hz}^{-1}`).
-    Beyond this, the function is ignorant of the input/output units.
-
-    E.g., if you provide the function with an input spectrum with
-    :math:`F_{\lambda}` in :math:`10^{-11}\ {\rm erg\ s}^{-1}\ {\rm
-    cm}^{-2}\ {\rm A}^{-1}`, the output will be :math:`F_{\nu}` in
-    Janskys.
+    The spectrum independent variable (`wave`) is always expected to
+    be the wavelength in angstroms. The input/output units always
+    expect :math:`F_{\lambda}` in :math:`10^{-17}\ {\rm erg\ s}^{-1}\
+    {\rm cm}^{-2}\ {\rm A}^{-1}` and :math:`F_{\nu}` in microjanskys
+    (:math:`10^{-29} {\rm erg\ s}^{-1}\ {\rm cm}^{-2}\ {\rm
+    Hz}^{-1}`). Beyond this, the function is ignorant of the
+    input/output units. For example, if you provide the function with
+    an input spectrum with :math:`F_{\lambda}` in :math:`10^{-11}\
+    {\rm erg\ s}^{-1}\ {\rm cm}^{-2}\ {\rm A}^{-1}`, the output will
+    be :math:`F_{\nu}` in Janskys.
 
     Args:
         wave (:obj:`float`, array-like):
@@ -317,11 +356,12 @@ class Spectrum:
 
         TODO: FIX THIS!!  It shouldn't use spectral_coordinate_step to get the mean dw.
         """
-        # TODO: Lazy load and then keep this?
-        dw = spectral_coordinate_step(self.wave, log=self.log)
-        if self.log:
-            dw *= numpy.log(10.)*self.wave
-        return dw
+        return angstroms_per_pixel(self.wave, log=self.log, regular=True)
+#        # TODO: Lazy load and then keep this?
+#        dw = spectral_coordinate_step(self.wave, log=self.log)
+#        if self.log:
+#            dw *= numpy.log(10.)*self.wave
+#        return dw
 
     def frequency_step(self):
         """
@@ -329,20 +369,48 @@ class Spectrum:
         """
         return 10*astropy.constants.c.to('km/s').value*self.wavelength_step()/self.wave/self.wave
 
-    def magnitude(self, band, system='AB'):
+    def magnitude(self, wavelength=None, band=None, system='AB'):
         """
         Calculate the magnitude of the object in the specified band.
+
+        If no arguments are provided, the magnitude is calculated for
+        the entire :attr:`flux` vector. Otherwise, the magnitude is
+        calculated at a single wavelength (see ``wavelength``) or
+        over a filter (see ``band``).
+
+        Args:
+            wavelength (:obj:`float`, optional):
+                The wavelength at which to calculate the magnitude.
+            band (:class:`~enyo.etc.efficiency.FilterResponse`, optional):
+                Object with the filter response function
+            system (:obj:`str`, optional):
+                Photometric system.  Currently must be ``AB``.
+
+        Returns:
+            :obj:`float`, `numpy.ndarray`_: The one or more magnitude
+            measurements, depending on the input.
+
+        Raises:
+            NotImplementedError:
+                Raised if the photometric system is not known.
         """
+        if wavelength is not None and band is not None:
+            warnings.warn('Provided both wavelength and band; wavelength takes precedence.')
+        # TODO: Check input.
         if system == 'AB':
             if self.nu is None:
                 self._frequency()
             if self.fnu is None:
                 # Flux in microJanskys
                 self.fnu = convert_flux_density(self.wave, self.flux)
-            dnu = self.frequency_step() 
-            band_weighted_mean = numpy.sum(band(self.wave)*self.fnu*dnu) \
-                                    / numpy.sum(band(self.wave)*dnu)
-            return -2.5*numpy.log10(band_weighted_mean*1e-29) - 48.6
+            if wavelength is not None:
+                fnu = self.fnu[numpy.argmin(numpy.absolute(self.wave - wavelength))]
+            elif band is not None:
+                dnu = self.frequency_step()
+                fnu = numpy.sum(band(self.wave)*self.fnu*dnu) / numpy.sum(band(self.wave)*dnu)
+            else:
+                fnu = self.fnu
+            return -2.5*numpy.log10(fnu*1e-29) - 48.6
 
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
@@ -374,11 +442,32 @@ class Spectrum:
         """
         return self.rescale(flux/self.interp(wave))
 
-    def rescale_magnitude(self, band, new_mag, system='AB'):
+    def rescale_magnitude(self, new_mag, wavelength=None, band=None, system='AB'):
         """
         Rescale the spectrum to an input magnitude.
+
+        Must provide either ``wavelength`` or ``band``. The object is
+        edited in-place.
+
+        Args:
+            new_mag (:obj:`float`):
+                The target magnitude
+            wavelength (:obj:`float`, optional):
+                The wavelength at which to calculate the magnitude.
+            band (:class:`~enyo.etc.efficiency.FilterResponse`, optional):
+                Object with the filter response function
+            system (:obj:`str`, optional):
+                Photometric system.  Currently must be ``AB``.
+
+        Raises:
+            ValueError:
+                Raised if neither ``wavelength`` nor ``band`` are provided.
+            NotImplementedError:
+                Raised if the photometric system is not known.
         """
-        dmag = new_mag - self.magnitude(band, system=system)
+        if wavelength is None and band is None:
+            raise ValueError('Must provide either wavelength or the bandpass filter.')
+        dmag = new_mag - self.magnitude(wavelength=wavelength, band=band, system=system)
         if system == 'AB':
             return self.rescale(numpy.power(10., -dmag/2.5))
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))

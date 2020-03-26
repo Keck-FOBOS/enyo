@@ -1,5 +1,3 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
 """
 Class to construct an observation
 
@@ -69,6 +67,9 @@ Telescope:
 """
 import os
 import warnings
+
+from IPython import embed
+
 import numpy
 
 from scipy import signal
@@ -157,7 +158,7 @@ class Observation:
     def __init__(self, telescope, sky_spectrum, spec_aperture, exposure_time, detector,
                  system_throughput=None, atmospheric_throughput=None, airmass=None,
                  onsky_source_distribution=None, source_spectrum=None, extraction=None,
-                 per_resolution_element=False): 
+                 snr_units='pixel'):
 
         # Save the input or use defaults
         self.source = onsky_source_distribution
@@ -171,7 +172,8 @@ class Observation:
         # Match the sampling of the sky and source spectrum, if possible
         self.sky_spectrum = sky_spectrum if self.source_spectrum is None else \
                                 spectrum.Spectrum(self.source_spectrum.wave,
-                                                  sky_spectrum.interp(self.source_spectrum.wave))
+                                                  sky_spectrum.interp(self.source_spectrum.wave),
+                                                  log=self.source_spectrum.log)
 
         # In the current implementation, the source spectrum is expected
         # to be:
@@ -183,10 +185,6 @@ class Observation:
                         else (None if self.source_spectrum is None 
                                 else self.source_spectrum.sres.copy())
 
-        if per_resolution_element and self.sres is None:
-            raise ValueError('Cannot compute signal per resolution element because resolution '
-                             'is not available.')
-
         self.atmospheric_throughput = atmospheric_throughput
         self.telescope = telescope
         self.aperture = spec_aperture
@@ -195,8 +193,13 @@ class Observation:
         self.exptime = exposure_time
         self.extraction = extraction
 
-        # Get the "aperture efficiency"
-        self.aperture_efficiency = 1.0 if self.source is None \
+        # Get the "aperture factor". If the source distribution is not
+        # provided, the source surface brightness is assumed to be
+        # uniform within the aperture (like the sky). In this case, the
+        # aperture factor is the area of the aperture itself so that
+        # the object flux is the integral of the surface brightness
+        # over the aperture size (like the sky).
+        self.aperture_factor = self.aperture.area if self.source is None \
                                      else self.aperture.integrate_over_source(self.source) \
                                                 / self.source.integral
 
@@ -204,7 +207,7 @@ class Observation:
         # electrons per second per angstrom
         _object_flux = numpy.zeros(self.wave.size, dtype=float) if self.source_spectrum is None \
                             else self.source_spectrum.photon_flux(inplace=False) \
-                                    * self.telescope.area * self.aperture_efficiency \
+                                    * self.telescope.area * self.aperture_factor \
                                     * self.detector(self.wave)
         if self.atmospheric_throughput is not None:
             _object_flux *= self.atmospheric_throughput(self.wave)
@@ -214,20 +217,35 @@ class Observation:
         # Total sky flux in electrons per second per angstrom; the
         # provided sky spectrum is always assumed to be uniform over the
         # aperture
-        _sky_flux = self.sky_spectrum.photon_flux(inplace=False) * self.aperture.area \
-                        * self.telescope.area * self.detector(self.wave)
+        _sky_flux = self.sky_spectrum.photon_flux(inplace=False) \
+                        * self.telescope.area * self.aperture.area \
+                        * self.detector(self.wave)
         if self.system_throughput is not None:
             _sky_flux *= self.system_throughput(self.wave)
 
-        # Convert flux to per resolution element instead of per angstrom
-        if per_resolution_element and self.sres is not None:
-            _object_flux *= self.wave / self.sres
-            _sky_flux *= self.wave / self.sres
+        # Set the units for the output:
+        dw = self.sky_spectrum.wavelength_step()
+        if snr_units == 'pixel':
+            _object_flux *= dw
+            _sky_flux *= dw
+            spectral_width = 1.
+        elif snr_units == 'angstrom':
+            spectral_width = 1./dw
+        elif snr_units == 'resolution':
+            if self.sres is None:
+                raise ValueError('Cannot compute S/N per resolution element without resolution '
+                                 'vector.')
+            _object_flux *= self.wave/self.sres
+            _sky_flux *= self.wave/self.sres
+            spectral_width = self.wave/self.sres/dw
+        else:
+            raise ValueError('Unknown S/N units requested.')
 
         # Observe and extract the source
         # TODO: Set spectral_pixels...
         self.object_flux, self.obj_shot_var, self.sky_flux, self.sky_shot_var, self.read_var \
-                = self.extraction.sum_signal_and_noise(_object_flux, _sky_flux, self.exptime)
+                = self.extraction.sum_signal_and_noise(_object_flux, _sky_flux, self.exptime,
+                                                       spectral_width=spectral_width)
 
     def simulate(self, sky_only=False):
         """
@@ -250,10 +268,11 @@ class Observation:
                                          else self.source_spectrum.log)
 
     def snr(self, sky_sub=False):
-        flux = self.object_flux
+        flux = self.object_flux + self.sky_flux
         var = self.obj_shot_var + self.sky_shot_var + self.read_var
-        if not sky_sub:
-            flux += self.sky_flux
+        if sky_sub:
+            flux -= self.sky_flux
+            var += self.sky_shot_var
         # TODO: add additional noise from sky subtraction
         return spectrum.Spectrum(self.wave, flux / numpy.sqrt(var),
                                  log=self.sky_spectrum.log if self.source_spectrum is None

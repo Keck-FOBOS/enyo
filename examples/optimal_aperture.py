@@ -117,14 +117,14 @@ def onsky_aperture_snr(telescope, mag, seeing, on_sky_fiber_diameter, dmag_sky=N
     wave = numpy.linspace(3000., 10000., num=7001)
     spec = spectrum.ABReferenceSpectrum(wave)
     g = efficiency.FilterResponse()
-    spec.rescale_magnitude(g, mag)
+    spec.rescale_magnitude(mag, band=g)
 
     # Sky Spectrum; units are 1e-17 erg/s/cm^2/angstrom/arcsec^2
     sky = spectrum.MaunakeaSkySpectrum()
     sky_mag = sky.magnitude(g)
     if dmag_sky is not None:
         sky_mag += dmag_sky
-        sky.rescale_magnitude(g, sky_mag)
+        sky.rescale_magnitude(sky_mag, band=g)
 
 #    # For the image representation of the fiber and source, use a fixed
 #    # sampling

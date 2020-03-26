@@ -14,7 +14,7 @@ def test_mag():
     g = efficiency.FilterResponse()
     print(spec.magnitude(g))
 
-    spec.rescale_magnitude(g, 10)
+    spec.rescale_magnitude(10, band=g)
     print(spec.magnitude(g))
 
 #    pyplot.plot(spec.wave, spec.flux)
@@ -178,7 +178,7 @@ def fiddles_model(mag, telescope, seeing, exposure_time, airmass=1.0, fiddles_fr
     g = efficiency.FilterResponse()
 
     # Rescale to a specified magnitude
-    spec.rescale_magnitude(g, mag)
+    spec.rescale_magnitude(mag, band=g)
     print('Star Magnitude (AB mag): {0:.2f}'.format(spec.magnitude(g)))
 
     # Sky Spectrum; units are 1e-17 erg/s/cm^2/angstrom/arcsec^2
@@ -187,7 +187,7 @@ def fiddles_model(mag, telescope, seeing, exposure_time, airmass=1.0, fiddles_fr
     print('Sky Surface Brightness (AB mag/arcsec^2): {0:.2f}'.format(sky_mag))
     if dmag_sky is not None:
         sky_mag += dmag_sky
-        sky.rescale_magnitude(g, sky_mag)
+        sky.rescale_magnitude(sky_mag, band=g)
 
     # Fiddles detector
     fiddles_pixel_size = 7.4e-3 # mm
@@ -433,12 +433,12 @@ def spec_eff_plot(plot_file=None):
     wave = numpy.linspace(3000., 10000., num=7001)
     spec = spectrum.ABReferenceSpectrum(wave)
     g = efficiency.FilterResponse()
-    spec.rescale_magnitude(g, mag)
+    spec.rescale_magnitude(mag, band=g)
     sky = spectrum.MaunakeaSkySpectrum()
     sky_mag = sky.magnitude(g)
     if dmag_sky is not None:
         sky_mag += dmag_sky
-        sky.rescale_magnitude(g, sky_mag)
+        sky.rescale_magnitude(sky_mag, band=g)
 
     # Efficiencies
     atm = efficiency.AtmosphericThroughput(airmass=airmass)
@@ -522,7 +522,7 @@ if __name__ == '__main__':
     g = efficiency.FilterResponse()
 #    print('Magnitude: {0:.2f}'.format(spec.magnitude(g)))
 
-    spec.rescale_magnitude(g, 22.0)
+    spec.rescale_magnitude(22.0, band=g)
     print('Magnitude: {0:.2f}'.format(spec.magnitude(g)))
 
 

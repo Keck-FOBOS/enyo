@@ -82,7 +82,7 @@ def twod_spec():
     star_spec.show()
 
     g = efficiency.FilterResponse()
-    star_spec.rescale_magnitude(g, mag)
+    star_spec.rescale_magnitude(mag, band=g)
 
     sky_spec = spectrum.MaunakeaSkySpectrum()
 
@@ -203,7 +203,7 @@ def gal_set_image():
     for i in range(nslits):
         gal_spec = spectrum.BlueGalaxySpectrum()
         gal_spec.redshift(z[i])
-        gal_spec.rescale_magnitude(g, mag[i])
+        gal_spec.rescale_magnitude(mag[i], band=g)
 
         field_coo = numpy.array([slit_x[i], slit_y[i]])
 

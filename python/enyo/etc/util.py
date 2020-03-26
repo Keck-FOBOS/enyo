@@ -54,3 +54,5 @@ def boxcar_replicate(arr, boxcar):
     for axis, box in zip(range(arr.ndim), _boxcar):
         _arr = numpy.repeat(_arr, box, axis=axis)
     return _arr
+
+

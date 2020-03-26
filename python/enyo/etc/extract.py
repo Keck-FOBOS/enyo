@@ -1,5 +1,5 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
+from IPython import embed
+
 import numpy
 from scipy import special
 
@@ -46,41 +46,46 @@ class Extraction:
         # 2D profile? ...
 #        self.profile = self.spectral_profile[:,None]*self.spatial_profile[None,:]
 
-    def sum_signal_and_noise(self, object_flux, sky_flux, exposure_time, spectral_pixels=3.):
+    def sum_signal_and_noise(self, object_flux, sky_flux, exposure_time, spectral_width=1.):
         """
-        Get the signal and noise from a summed extraction. NO SUMMING
-        IS DONE SPECTRALLY.
+        Get the signal and noise from a summed extraction.
 
         Fluxes should be in electrons per second per resolution
-        element or per angstrom. Flux per second isn't explicitly
-        necessary for the calculation, but it allows for a
-        consistency with the dark current calculation.
+        element, per angstrom, or per pixel.
 
-        object_flux and sky_flux can be spectra or individual values
+        The primary operation is to assume the input spectrum is
+        distributed in a spatial and spectral profile that is summed.
+        This operation *only* sums over the spatial profile. The
+        spectral width provided is used to set the number of pixels
+        extracted to construct the desired S/N units (per resolution
+        element, angstom, pixel). To get the S/N per pixel, use the
+        default. Otherwise, ``spectral_width`` is, e.g., the number
+        of pixels per angstrom.
+
+        object_flux and sky_flux can be spectra or individual values,
+        but they must match. I.e., if object_flux is a vector,
+        sky_flux should be also.
 
         Returned fluxes and errors are in electrons per resolution
-        element or per angstrom.
-
-        The input spectra are not resampled. The signal and variance
-        are returned in such that the S/N is per resolution element.
-        The `pixels_per_resolution` is used to set the how many
-        pixels to use when accounting for read noise.
+        element, per angstrom, or per pixel, depending on the input.
 
         """
         # Get the variance in each pixel
-        extract_box_n = len(self.spatial_profile) * spectral_pixels
+        extract_box_n = len(self.spatial_profile) * spectral_width
         read_var = numpy.square(self.detector.rn) * extract_box_n
         if isinstance(object_flux, numpy.ndarray):
-            ext_obj_flux = numpy.sum(object_flux[None,:]*self.spatial_profile[:,None], axis=0) \
-                                * exposure_time
-            ext_sky_flux = numpy.sum(sky_flux[None,:]*self.spatial_profile[:,None], axis=0) \
-                                * exposure_time
-            read_var = numpy.full_like(ext_obj_flux, read_var, dtype=float)
+            ext_obj_flux = numpy.sum(object_flux[None,:]*self.spatial_profile[:,None], axis=0)
+            ext_sky_flux = numpy.sum(sky_flux[None,:]*self.spatial_profile[:,None], axis=0)
+            if not isinstance(spectral_width, numpy.ndarray):
+                read_var = numpy.full_like(ext_obj_flux, read_var, dtype=float)
         else:
-            ext_obj_flux = numpy.sum(object_flux*self.spatial_profile) * exposure_time
-            ext_sky_flux = numpy.sum(sky_flux[None,:]*self.spatial_profile[:,None], axis=0) \
-                                * exposure_time
+            if isinstance(spectral_width, numpy.ndarray):
+                raise TypeError('Cannot use vector of spectral widths with individual fluxes.')
+            ext_obj_flux = numpy.sum(object_flux*self.spatial_profile)
+            ext_sky_flux = numpy.sum(sky_flux*self.spatial_profile)
 
+        ext_obj_flux *= exposure_time
+        ext_sky_flux *= exposure_time
         obj_shot_var = ext_obj_flux + self.detector.dark * extract_box_n * exposure_time
         sky_shot_var = ext_sky_flux + self.detector.dark * extract_box_n * exposure_time
 

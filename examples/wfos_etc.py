@@ -47,7 +47,7 @@ def main():
     spec = spectrum.ABReferenceSpectrum(wave)
     g = efficiency.FilterResponse()
     # Rescale to a specified magnitude
-    spec.rescale_magnitude(g, mag)
+    spec.rescale_magnitude(mag, band=g)
     print('Star Magnitude (AB mag): {0:.2f}'.format(spec.magnitude(g)))
 
     # Sky Spectrum; units are 1e-17 erg/s/cm^2/angstrom/arcsec^2
