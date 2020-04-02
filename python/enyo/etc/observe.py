@@ -82,64 +82,10 @@ class Observation:
     """
     Observation of the sky with or without a non-terrestrial source.
 
-    Args:
-        magnitude (scalar-like):
-            Apparent magnitude of the source.
-        exposure_time (scalar-like):
-            The total exposure time in seconds.
-        seeing (scalar-like):
-            The FWHM of the Gaussian seeing distribution in arcsec.
-        airmass (scalar-like):
-            The airmass of the observation.
-        resolution (array-like):
-            1D spectral resolution (:math:`R = \lambda/\Delta\lambda`).
-            Must be a scalar or match the length of the source spectrum
-            wavelength vector.
-        rn (scalar-like):
-            Detector read noise in electrons.
-        dark (scalar-like):
-            Detector dark current in electrons per second.
-        qe (scalar-like):
-            Detector quantum efficiency (wavelength indepedent).
-        spectrograph_throughput
-            (:class:`efficiency.SpectrographThroughput`, optional):
-            The spectrograph throughput objects.  If not provided, uses
-            data in data/efficiency/fiber_wfos_throughput.db.
-        fiber_diameter (scalar-like, optional):
-            On-sky diameter of the fiber in arcseconds.
-        spectral_fwhm (scalar-like, optional):
-            The FHWM of the Gaussian line-spread function of the
-            instrument at the detector in pixels.
-        spectral_width (scalar-like, optional):
-            The extraction width of the spectral pixel in number of FWHM.
-        spatial_fwhm (scalar-like, optional):
-            The FHWM of the Gaussian point-spread function of the
-            fiber on the detector in pixels.
-        spatial_width (scalar-like, optional):
-            The extraction width of the spatial pixel in number of FWHM.
-        surface_brightness (scalar-like, optional):
-            Central surface brightness of the object is AB mag /
-            arcsec^2.
-        reff (scalar-like, optional):
-            The effective (half-light) radius in pixels.
-        sersic_index (scalar-like, optional):
-            The Sersic index.
-        redshift (scalar-like, optional):
-            Redshift of the source.
-        spectrum (:obj:`str`, :class:`spectrum.Spectrum`, optional):
-            The spectrum of the source.  Can be a spectrum object, a
-            string used to set the object, or a file name read using
-            :func:`enyo.etc.spectrum.Spectrum.from_file`.  Cannot be
-            None.
-        sky (:obj:`str`, :class:`spectrum.Spectrum`, optional):
-            The spectrum of the night-sky.  Can be a spectrum object, a
-            string used to set the object, or a file name read using
-            :func:`enyo.etc.spectrum.Spectrum.from_file`.  Cannot be
-            None.
-        normalizing_band (:obj:`str`, optional):
-            Rest-frame broad-band filter in which the magnitude or
-            surface brightness is defined.
+    update this!!
 
+    Args:
+        telescope
 
     if atmospheric throughput is not provided, assume Maunakea curve
     if airmass is None, use default defined by atmospheric throughput class/instance

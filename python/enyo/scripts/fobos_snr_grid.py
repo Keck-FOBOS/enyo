@@ -113,8 +113,8 @@ def main(args):
     # detector QE (not sure about ADC). Because this is the total
     # throughput, define a generic efficiency object.
     thru_db = numpy.genfromtxt(os.path.join(os.environ['ENYO_DIR'], 'data/efficiency',
-                               'fiber_wfos_throughput.db'))
-    spectrograph_throughput = efficiency.Efficiency(thru_db[:,3], wave=thru_db[:,0])
+                               'fobos_throughput.db'))
+    spectrograph_throughput = efficiency.Efficiency(thru_db[:,1], wave=thru_db[:,0])
 
     # System efficiency combines the spectrograph and the telescope
     system_throughput = efficiency.SystemThroughput(wave=spec.wave,
@@ -122,8 +122,8 @@ def main(args):
                                                     telescope=telescope.throughput)
 
     # Instantiate the detector; really just a container for the rn and
-    # dark current for now. QE is included in fiber_wfos_throughput.db
-    # file, so I set it to 1 here.
+    # dark current for now. QE is included in fobos_throughput.db file,
+    # so I set it to 1 here.
     det = detector.Detector(rn=rn, dark=dark, qe=1.0)
 
     # Extraction: makes simple assumptions about the detector PSF for
