@@ -18,3 +18,11 @@ def enyo_source_dir():
 
 os.environ['ENYO_DIR'] = enyo_source_dir()
 
+def short_warning(message, category, filename, lineno, file=None, line=None):
+    """
+    Return the format for a short warning message.
+    """
+    return ' %s: %s\n' % (category.__name__, message)
+
+import warnings
+warnings.formatwarning = short_warning
