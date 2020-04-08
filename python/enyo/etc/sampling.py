@@ -14,17 +14,10 @@ Provides a set of functions to handle resampling.
     | **30 Aug 2018**: Moved here from old instrument.py module by K.
         Westfall (KBW).
 """
-
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import unicode_literals
-
-import sys
-if sys.version > '3':
-    long = int
-
 import warnings
+
+from IPython import embed
+
 import numpy
 from scipy import interpolate
 import astropy.constants
@@ -433,7 +426,7 @@ class Resample:
         # The mask and errors are always interpolated as a step function
         self.oute = None if self.e is None else self._resample_step(self.e, quad=True)
         
-        self.outf = self._resample_step(numpy.invert(self.m).astype(int)) \
+        self.outf = self._resample_step(numpy.invert(self.m).astype(float)) \
                         / numpy.diff(self.outborders)
 
         # Do not conserve the integral over the size of the pixel

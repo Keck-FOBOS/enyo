@@ -193,19 +193,30 @@ class Observation:
                 = self.extraction.sum_signal_and_noise(_object_flux, _sky_flux, self.exptime,
                                                        spectral_width=spectral_width)
 
-    def simulate(self, sky_only=False):
+    def simulate(self, sky_only=False, sky_sub=False, sky_err=0.1):
         """
         Return a simulated spectrum
         """
         if sky_only:
             shot_var = self.sky_shot_var
             flux = self.sky_flux
+        elif sky_sub:
+            shot_var = self.obj_shot_var + (1 + numpy.square(sky_err))*self.sky_shot_var
+            flux = self.object_flux
         else:
             shot_var = self.obj_shot_var + self.sky_shot_var
             flux = self.object_flux + self.sky_flux
 
-        # Draw from a Poisson distribution for the shot noise
-        shot_draw = numpy.random.poisson(lam=shot_var)
+#        error=numpy.sqrt(shot_var + self.read_var)
+#        draw = numpy.random.normal(scale=error)
+#        return spectrum.Spectrum(self.wave, flux + draw, error=error,
+#                                 log=self.sky_spectrum.log if self.source_spectrum is None
+#                                         else self.source_spectrum.log)
+
+        # Draw from a Poisson distribution for the shot noise,
+        # subtracted the expectation value of the distribution so that
+        # only the noise is added
+        shot_draw = numpy.random.poisson(lam=shot_var)-shot_var
         # Draw from a Gaussian distribution for the read noise
         read_draw = numpy.random.normal(scale=numpy.sqrt(self.read_var))
         return spectrum.Spectrum(self.wave, flux + shot_draw + read_draw,
@@ -213,12 +224,12 @@ class Observation:
                                  log=self.sky_spectrum.log if self.source_spectrum is None
                                          else self.source_spectrum.log)
 
-    def snr(self, sky_sub=False):
+    def snr(self, sky_sub=False, sky_err=0.1):
         flux = self.object_flux + self.sky_flux
         var = self.obj_shot_var + self.sky_shot_var + self.read_var
         if sky_sub:
             flux -= self.sky_flux
-            var += self.sky_shot_var
+            var += numpy.square(sky_err)*self.sky_shot_var
         # TODO: add additional noise from sky subtraction
         return spectrum.Spectrum(self.wave, flux / numpy.sqrt(var),
                                  log=self.sky_spectrum.log if self.source_spectrum is None

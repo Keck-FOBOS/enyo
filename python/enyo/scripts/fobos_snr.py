@@ -11,6 +11,8 @@ import numpy
 
 from matplotlib import pyplot, ticker
 
+from astropy import units
+
 from enyo.etc import source, efficiency, telescopes, spectrum, extract, aperture, detector
 from enyo.etc.observe import Observation
 
@@ -18,6 +20,23 @@ from enyo.etc.observe import Observation
 def parse_args(options=None):
 
     parser = argparse.ArgumentParser()
+
+    parser.add_argument('--spec_file', default=None, type=str,
+                        help='A fits or ascii file with the object spectrum to use')
+    parser.add_argument('--spec_wave', default='WAVE',
+                        help='Extension or column number with the wavelengths.')
+    parser.add_argument('--spec_wave_units', default='angstrom',
+                        help='Wavelength units')
+    parser.add_argument('--spec_flux', default='FLUX',
+                        help='Extension or column number with the flux.')
+    res_group = parser.add_mutually_exclusive_group()
+    res_group.add_argument('--spec_res_indx', default=None,
+                           help='Extension or column number with the flux.')
+    res_group.add_argument('--spec_res_value', default=None,
+                           help='Single value for the spectral resolution (R = lambda/dlambda) '
+                                'for the full spectrum.')
+    parser.add_argument('--spec_table', default=None,
+                        help='Extension in the fits file with the binary table data.')
 
     parser.add_argument('-w', '--wavelengths', default=[3100,10000,4e-5], nargs=3, type=float,
                         help='Wavelength grid: start wave, approx end wave, logarithmic step.')
@@ -52,6 +71,13 @@ def parse_args(options=None):
     parser.add_argument('--snr_units', type=str, default='pixel',
                         help='The units for the S/N.  Options are pixel, angstrom, resolution.')
 
+    parser.add_argument('--sky_err', type=float, default=0.1,
+                        help='The fraction of the Poisson error in the sky incurred when '
+                             'subtracting the sky from the observation. Set to 0 for a sky '
+                             'subtraction that adds no error to the sky-subtracted spectrum; set '
+                             'to 1 for a sky-subtraction error that is the same as the Poisson '
+                             'error in the sky spectrum acquired during the observation.')
+
     return parser.parse_args() if options is None else parser.parse_args(options)
 
 
@@ -76,10 +102,65 @@ def get_wavelength_vector(start, end, logstep):
     return numpy.power(10., numpy.arange(nwave)*logstep + numpy.log10(start))
 
 
-def get_spectrum(wave, mag, emline_db=None, redshift=0.0, resolution=3500):
+def read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_indx, spec_res_value,
+                  spec_table, wave, resolution):
     """
     """
-    spec = spectrum.ABReferenceSpectrum(wave, resolution=resolution, log=True)
+    if not os.path.isfile(spec_file):
+        raise FileNotFoundError('{0} does not exist.'.format(spec_file))
+
+    print('Reading spectrum.')
+    # First assume it's a fits file
+    try:
+        spec = spectrum.Spectrum.from_fits(spec_file, waveext=spec_wave, waveunits=spec_wave_units,
+                                           fluxext=spec_flux, resext=spec_res, tblext=spec_table,
+                                           resolution=spec_res_value,
+                                           use_sampling_assessments=True)
+    except:
+        spec = None
+
+    if spec is None:
+        # Then assume it's an ascii file
+        try:
+            rescol = None if spec_res_indx is None else int(spec_res_indx)
+            spec = spectrum.Spectrum.from_ascii(spec_file, wavecol=int(spec_wave),
+                                                waveunits=spec_wave_units, fluxcol=int(spec_flux),
+                                                rescol=rescol, resolution=spec_res_value,
+                                                use_sampling_assessments=True)
+        except:
+            spec = None
+
+    if spec is None:
+        raise IOError('Could not read provided file.')
+
+    # Force the spectrum to be regularly sampled on a logarithmic grid
+    if not spec.regular:
+        print('Imposing uniform sampling')
+        spec = spec.resample(log=True)
+
+    # If the resolution is available match it to the resultion set for
+    # the FOBOS spectrum
+    if spec.sres is not None:
+        if numpy.all(spec.sres > resolution):
+            print('Convolving to FOBOS spectral resolution.')
+            spec = spec.match_resolution(resolution)
+        else:
+            warnings.warn('Spectral resolution of the spectrum is below what FOBOS will provide.')
+
+    # Down-sample to the provided wavelength vector
+    print('Resampling to requested wavelength range.')
+    return spec.resample(wave=wave, log=True)
+
+
+def get_spectrum(wave, mag, spec_file=None, spec_wave=None, spec_wave_units=None, spec_flux=None,
+                 spec_res_indx=None, spec_res_value=None, spec_table=None, emline_db=None,
+                 redshift=0.0, resolution=3500):
+    """
+    """
+    spec = spectrum.ABReferenceSpectrum(wave, resolution=resolution, log=True) \
+                if spec_file is None \
+                else read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_indx,
+                                   spec_res_value, spec_table, wave, resolution)
     g = efficiency.FilterResponse()
     spec.rescale_magnitude(mag, band=g)
     if emline_db is None:
@@ -123,6 +204,9 @@ def get_source_distribution(fwhm, uniform, sersic):
 
 def main(args):
 
+    if args.sky_err < 0 or args.sky_err > 1:
+        raise ValueError('--sky_err option must provide a value between 0 and 1.')
+
     t = time.perf_counter()
 
     # Constants:
@@ -142,7 +226,10 @@ def main(args):
     #   - independent of position within the source
     wave = get_wavelength_vector(args.wavelengths[0], args.wavelengths[1], args.wavelengths[2])
     emline_db = None if args.emline is None else read_emission_line_database(args.emline)
-    spec = get_spectrum(wave, args.mag, emline_db=emline_db, redshift=args.redshift,
+    spec = get_spectrum(wave, args.mag, spec_file=args.spec_file, spec_wave=args.spec_wave,
+                        spec_wave_units=args.spec_wave_units, spec_flux=args.spec_flux,
+                        spec_res_indx=args.spec_res_indx, spec_res_value=args.spec_res_value,
+                        spec_table=args.spec_table, emline_db=emline_db, redshift=args.redshift,
                         resolution=resolution)
 
     # Get the source distribution.  If the source is uniform, onsky is None.
@@ -206,8 +293,7 @@ def main(args):
                       snr_units=args.snr_units)
 
     # Construct the S/N spectrum
-    snr = obs.snr(sky_sub=True)
-
+    snr = obs.snr(sky_sub=True, sky_err=args.sky_err)
     if args.ipython:
         embed()
 
@@ -252,6 +338,7 @@ def main(args):
     # Report
     g = efficiency.FilterResponse()
     r = efficiency.FilterResponse(band='r')
+    iband = efficiency.FilterResponse(band='i')
     print('-'*70)
     print('{0:^70}'.format('FOBOS S/N Calculation (v0.1)'))
     print('-'*70)
@@ -269,4 +356,6 @@ def main(args):
                 numpy.sum(g(snr.wave)*snr.flux)/numpy.sum(g(snr.wave))))
     print('r-band weighted mean {0} {1:.1f}'.format(snr_label,
                 numpy.sum(r(snr.wave)*snr.flux)/numpy.sum(r(snr.wave))))
+    print('i-band weighted mean {0} {1:.1f}'.format(snr_label,
+                numpy.sum(iband(snr.wave)*snr.flux)/numpy.sum(iband(snr.wave))))
 

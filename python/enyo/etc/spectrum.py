@@ -3,21 +3,25 @@
 """
 Spectrum utilities
 """
-
 import os
+import warnings
 
 from IPython import embed
 
 import numpy
 from scipy import interpolate
 from astropy.io import fits
+from astropy.wcs import WCS
 import astropy.constants
 import astropy.units
 
 from matplotlib import pyplot
 
+from pydl.goddard.astro import airtovac
+
 from ..util.lineprofiles import IntegratedGaussianLSF
 from .sampling import Resample
+from .resolution import match_spectral_resolution
 
 def spectral_coordinate_step(wave, log=False, base=10.0):
     """
@@ -89,7 +93,7 @@ def angstroms_per_pixel(wave, log=False, base=10.0, regular=True):
                       + [(3*wave[-1]-wave[-2])/2])
 
 
-def convert_flux_density(wave, flux, density='ang'):
+def convert_flux_density(wave, flux, error=None, density='ang'):
     r"""
     Convert a spectrum with flux per unit wavelength to per unit
     frequency or vice versa.
@@ -117,13 +121,18 @@ def convert_flux_density(wave, flux, density='ang'):
             The vector with the wavelengths in angstroms.
         flux (:obj:`float`, array-like):
             The vector with the flux density; cf. `density`.
+        error (:obj:`float`, array-like, optional):
+            The error in the flux measurements. If None, no errors
+            are returned.
         density (:obj:`str`, optional):
             The density unit of the *input* spectrum.  Must be either
             'ang' or 'Hz'.  If the input spectrum is :math:`F_{\lambda}`
             (`density='ang'`), the returned spectrum is :math:`F_{\nu}`.
 
     Returns:
-        The spectrum with the converted units.
+        :obj:`float`, `numpy.ndarray`_, :obj:`tuple`: The flux with
+        the converted units. If the spectrum errors are not provided,
+        only the flux value or array is returned.
 
     Raises:
         ValueError:
@@ -135,15 +144,73 @@ def convert_flux_density(wave, flux, density='ang'):
     _flux = numpy.atleast_1d(flux)
     if _wave.shape != _flux.shape:
         raise ValueError('Wavelength and flux arrays must have the same shape.')
+    if error is not None:
+        _error = numpy.atleast_1d(error)
+        if _error.shape != _flux.shape:
+            raise ValueError('Error and flux arrays must have the same shape.')
     if density == 'ang':
         # Convert Flambda to Fnu
-        fnu = _flux*numpy.square(_wave)*1e12/astropy.constants.c.to('angstrom/s').value
+        factor = numpy.square(_wave)*1e12/astropy.constants.c.to('angstrom/s').value
+        fnu = _flux*factor
+        if error is not None:
+            fnu_err = _error*factor
+            return (fnu[0], fnu_err[0]) if isinstance(flux, float) else (fnu, fnu_err)
         return fnu[0] if isinstance(flux, float) else fnu
     if density == 'Hz':
         # Convert Fnu to Flambda
-        flambda = _flux*astropy.constants.c.to('angstrom/s').value/numpy.square(_wave)/1e12
+        factor = astropy.constants.c.to('angstrom/s').value/numpy.square(_wave)/1e12
+        flambda = _flux*factor
+        if error is not None:
+            flambda_err = _error*factor
+            return (flambda[0], flambda_err[0]) if isinstance(flux, float) \
+                        else (flambda, flambda_err)
         return flambda[0] if isinstance(flux, float) else flambda
     raise ValueError('Density units must be either \'ang\' or \'Hz\'.')
+
+
+def convert_flux_units(wave, flux, current_units, error=None):
+    r"""
+    Convert flux density units to ``'1e-17 erg / (cm2 s angstrom)'``.
+
+    The flux density can be per unit frequency (:math:`F_{\nu}`) or
+    per unit wavelength (:math:`F_{\lambda}`). If a basic unit
+    conversion from the current units to ``'1e-17 erg / (cm2 s
+    angstrom)'`` fails, it's assumed that the user provided
+    :math:`F_{\nu}`. If the conversion from the current units to
+    ``'1e-29 erg / (cm2 Hz s)'`` also fails, the method faults.
+
+    Args:
+        wave (`numpy.ndarray`_):
+            Wavelength in angstroms.
+        flux (`numpy.ndarray`_):
+            Flux density measurements.
+        current_units (:obj:`str`):
+            Input units of the flux density. Must be interpretable by
+            `astropy.units.Unit`_.
+        error (`numpy.ndarray`_):
+            Error vector.  Ignored if None.
+
+    Returns:
+        `numpy.ndarray`_, :obj:`tuple`: The converted flux vector. If
+        an error vector is provided, it is also returned as the
+        second element.
+    """
+    try:
+        # Get unit-conversion factor needed to convert to 1e-17
+        # erg/s/cm^2/angstrom. First assume the fluxes are in
+        # F_lambda
+        conversion = astropy.units.Unit(current_units).to('1e-17 erg / (cm2 s angstrom)')
+    except astropy.units.core.UnitConversionError as e:
+        # Assume this unit conversion failure is because the flux is
+        # F_nu, not F_lambda.
+        try:
+            # Convert F_nu units to those expected by convert_flux_density
+            flux *= astropy.units.Unit(current_units).to('1e-29 erg / (cm2 Hz s)')
+        except:
+            # If that failed, we're really hosed.
+            raise ValueError('Unable to handle flux units') from e
+        return convert_flux_density(wave, flux, error=error, density='Hz')
+    return flux*conversion if error is None else (flux*conversion, error*conversion)
 
 
 class Spectrum:
@@ -153,31 +220,72 @@ class Spectrum:
     Units are expected to be wavelength in angstroms and flux in 1e-17
     erg/s/cm^2/angstrom.
 
+    If wavelengths are provided in air (instantiated with
+    ``vacuum=False``), wavelengths are converted to vacuum and the
+    sampling is set to be irregular.
+
     .. todo::
-        - include mask
         - incorporate astropy units?
         - keep track of units
-        - allow wavelength vector to be irregularly gridded
 
     Args:
         wave (array-like):
             1D wavelength data in angstroms.  Expected to be sampled
             linearly or geometrically.
         flux (array-like):
-            1D flux data in 1e-17 erg/s/cm^2/angstrom.
-        resolution (float, array-like, optional):
+            1D flux data in 1e-17 erg/s/cm^2/angstrom. Use
+            :func:`convert_flux_units`, if necessary.
+        error (array-like):
+            1-sigma error in the flux data
+        mask (array-like):
+            Boolean mask for flux data (True=bad)
+        resolution (:obj:`float`, array-like, optional):
             1D spectral resolution (:math:`$R=\lambda/\Delta\lambda$`)
+        regular (:obj:`bool`, optional):
+            Spectrum is regularly sampled, either linearly or log-linearly
         log (:obj:`bool`, optional):
-            Spectrum is sampled in steps of log base 10.
+            Spectrum is sampled in steps of log base 10. If regular
+            is False, this is ignored.
+        airwave (:obj:`bool`, optional):
+            Spectrum wavelengths are provided in air. If True, the
+            wavelengths will be converted to vacuum, and the
+            wavelength step will be set to be irregular (if it isn't
+            already).
+        check (:obj:`bool`, optional):
+            Check sampling to confirm input.
+        use_sampling_assessments (:obj:`bool`, optional):
+            Override any values provided for ``regular`` and ``log``
+            and assess the spectral sampling directly from the
+            provided wavelength array.
     """
-    def __init__(self, wave, flux, error=None, resolution=None, log=False):
+    def __init__(self, wave, flux, error=None, mask=None, resolution=None, regular=True,
+                 log=False, airwave=False, check=True, use_sampling_assessments=False):
         # Check the input
         _wave = numpy.atleast_1d(wave)
+        if airwave:
+            _wave = airtovac(_wave)
         _flux = numpy.atleast_1d(flux)
         if _wave.ndim != 1:
             raise ValueError('Spectrum can only accommodate single vectors for now.')
         if _wave.shape != _flux.shape:
             raise ValueError('Wavelength and flux vectors do not match.')
+
+        # Sampling
+        if use_sampling_assessments:
+            self.regular, self.log = Spectrum.assess_sampling(_wave)
+        else:
+            self.regular = False if airwave else regular
+            self.log = log
+        if check:
+            found_regular, found_log = Spectrum.assess_sampling(_wave)
+            if self.regular != found_regular:
+                raise ValueError('Expected {0} sampling, found {1} sampling.'.format(
+                                    'regular' if self.regular else 'irregular',
+                                    'regular' if found_regular else 'irregular'))
+            if self.log != found_log:
+                raise ValueError('Geometric sampling {0} found, but {1} expected.'.format(
+                                    'was' if self.log else 'was not',
+                                    'was' if found_log else 'was not'))
 
         self.sres = None if resolution is None else numpy.atleast_1d(resolution)
         if self.sres is not None:
@@ -185,18 +293,54 @@ class Spectrum:
             if self.sres.size == 1:
                 self.sres = numpy.repeat(self.sres, _flux.size)
             if self.sres.shape != _flux.shape:
-                raise ValueError('Resolution vector must match length of flux vector.')
+                raise ValueError('Resolution vector must be a single number or a vector that '
+                                 'matches the length of flux vector.')
             
         self.error = None if error is None else numpy.atleast_1d(error)
         if self.error is not None and self.error.shape != _flux.shape:
             raise ValueError('Error vector must match length of flux vector.')
             
+        self.mask = None if mask is None else numpy.atleast_1d(mask)
+        if self.mask is not None and self.mask.shape != _flux.shape:
+            raise ValueError('Mask vector must match length of flux vector.')
+
+        # TODO: Need interpolators for the error and mask?
+
         self.interpolator = interpolate.interp1d(_wave, _flux, assume_sorted=True)
         self.size = _wave.size
         # TODO: Check log against the input wavelength vector
-        self.log = log
         self.nu = self._frequency()
         self.fnu = None
+
+        # Do this brute force Vega magnitude calculations for the time
+        # being
+        self._vega = None
+        
+    @staticmethod
+    def assess_sampling(wave):
+        """
+        Assess the wavelength sampling directly from the wavelength vector.
+
+        Args:
+            wave (array-like):
+                Array with the wavelengths.
+
+        Returns:
+            :obj:`tuple`: Two booleans are returned. The first
+            indicates if the wavelength vector is regularly sampled
+            (either linearly or log-linearly), the second indicates
+            if the sampling is log-linear.
+        """
+        # Use absolute to allow for a monotonically decreasing wavelength vector
+        ddw = numpy.diff(numpy.absolute(numpy.diff(wave)))
+        regular = numpy.all(ddw < 100*numpy.finfo(ddw.dtype).eps)
+        if regular:
+            return regular, False
+        ddw = numpy.diff(numpy.absolute(numpy.diff(numpy.log(wave))))
+        regular = numpy.all(ddw < 100*numpy.finfo(ddw.dtype).eps)
+        if regular:
+            return regular, True
+        return False, False
 
     @property
     def wave(self):
@@ -213,9 +357,14 @@ class Spectrum:
         return self.interpolator.y
 
     def copy(self):
+        """
+        Return a deep copy of the spectrum.
+        """
         return Spectrum(self.wave.copy(), self.flux.copy(),
                         error=None if self.error is None else self.error.copy(),
-                        resolution=None if self.sres is None else self.sres.copy(), log=self.log)
+                        mask=None if self.mask is None else self.mask.copy(),
+                        resolution=None if self.sres is None else self.sres.copy(),
+                        regular=self.regular, log=self.log, check=False)
 
     def _arith(self, other, func):
         if isinstance(other, Spectrum):
@@ -259,8 +408,9 @@ class Spectrum:
 
     def inverse(self):
         error = None if self.error is None else self.error/numpy.square(self.interpolator.y)
-        return Spectrum(self.wave, 1./self.interpolator.y, error=error, resolution=self.sres,
-                        log=self.log)
+        return Spectrum(self.wave, 1./self.interpolator.y, error=error,
+                        mask=None if self.mask is None else self.mask.copy(), resolution=self.sres,
+                        regular=self.regular, log=self.log)
 
     def _mul_spectrum(self, rhs):
         """
@@ -270,6 +420,7 @@ class Spectrum:
             raise NotImplementedError('To perform arithmetic on spectra, their wavelength arrays '
                                       'must be identical.')
         flux = self.flux * rhs.flux
+
         if self.error is None and rhs.error is None:
             error = None
         else:
@@ -279,11 +430,22 @@ class Spectrum:
             if rhs.error is not None:
                 error += numpy.square(rhs.error/rhs.flux)
             error = numpy.sqrt(error) * numpy.absolute(flux)
+
+        if self.mask is None and rhs.mask is None:
+            mask = None
+        else:
+            mask = numpy.zeros(self.size, dtype=bool)
+            if self.mask is not None:
+                mask |= self.mask
+            if rhs.mask is not None:
+                mask |= rhs.mask
+            
         if self.sres is not None and rhs.sres is not None \
                 and not numpy.array_equal(self.sres, rhs.sres):
             warnings.warn('Spectral resolution is not correctly propagated.')
         sres = self.sres if self.sres is not None else rhs.sres
-        return Spectrum(self.wave, flux, error=error, resolution=sres, log=self.log)
+        return Spectrum(self.wave, flux, error=error, mask=mask, resolution=sres, regular=regular,
+                        log=self.log)
 
     def _add_spectrum(self, rhs):
         """
@@ -293,6 +455,7 @@ class Spectrum:
             raise NotImplementedError('To perform arithmetic on spectra, their wavelength arrays '
                                       'must be identical.')
         flux = self.flux + rhs.flux
+
         if self.error is None and rhs.error is None:
             error = None
         else:
@@ -302,11 +465,22 @@ class Spectrum:
             if rhs.error is not None:
                 error += numpy.square(rhs.error)
             error = numpy.sqrt(error)
+
+        if self.mask is None and rhs.mask is None:
+            mask = None
+        else:
+            mask = numpy.zeros(self.size, dtype=bool)
+            if self.mask is not None:
+                mask |= self.mask
+            if rhs.mask is not None:
+                mask |= rhs.mask
+            
         if self.sres is not None and rhs.sres is not None \
                 and not numpy.array_equal(self.sres, rhs.sres):
             warnings.warn('Spectral resolution is not correctly propagated.')
         sres = self.sres if self.sres is not None else rhs.sres
-        return Spectrum(self.wave, flux, error=error, resolution=sres, log=self.log)
+        return Spectrum(self.wave, flux, error=error, mask=mask, resolution=sres,
+                        regular=self.regular, log=self.log)
 
     def __len__(self):
         return self.interpolator.x.size
@@ -339,29 +513,266 @@ class Spectrum:
         sampled[indx] = self.interpolator(w[indx])
         return sampled
 
+    @staticmethod
+    def wcs_wavelength_vector(wcs, nwave, naxis=1, axis=0):
+        """
+        Generate the wavelength vector using the provided
+        `astropy.wcs.WCS`_ object.
+        
+        Returns:
+            `numpy.ndarray`_: Vector with wavelengths defined by
+            :attr:`wcs`.
+        """
+        coo = numpy.ones((nwave,naxis), dtype=float)
+        coo[...,axis] = numpy.arange(nwave)+1
+        wave = wcs.all_pix2world(coo, 1)[...,axis]
+        dimensionless = wcs.wcs.cunit[axis] is astropy.units.dimensionless_unscaled
+        if dimensionless:
+            # NOTE: If the axis is dimensionless, assume that the units
+            # are angstroms!
+            warnings.warn('No units defined for wavelength axis.  Assuming angstroms.')
+        return wave if dimensionless else wave*wcs.wcs.cunit[axis].to('angstrom')
+
     @classmethod
-    def from_file(cls, fitsfile, waveext='WAVE', fluxext='FLUX', resext=None):
+    def from_fits(cls, ifile, waveext='WAVE', waveunits='angstrom', fluxext='FLUX',
+                  fluxunits=None, errext=None, ivarext=None, maskext=None, resext=None,
+                  tblext=None, **kwargs):
         """
-        Construct the spectrum using a fits file.
+        Construct a spectrum using data from a fits file.
+
+        Fluxes must be in units of flux density (i.e., flux per unit
+        angstrom or Hz).
+
+        .. todo::
+
+            - Allow for a "frequency" extension instead of
+              wavelengths?
+
+        Args:
+            ifile (:obj:`str`):
+                Name of the fits file.
+            waveext (:obj:`str`, :obj:`int`, optional):
+                Extension with the wavelength data. If set to 'WCS',
+                the wavelengths are constructed using the WCS in the
+                flux extension header. If the data is instead one
+                column in a binary table extension, see ``tblext``.
+            waveunits (:obj:`str`, optional):
+                Units of the wavelengths in the fits file. WARNING:
+                If you try to build the wavelength array using the
+                WCS in the header, the wavelength array will be
+                converted to angstroms based on the WCS units. If the
+                WCS units are not defined, the values read from the
+                WCS are not altered, but can be fixed using this
+                keyword.
+            fluxext (:obj:`str`, :obj:`int`, optional):
+                Extension with the flux data. If the data is instead
+                one column in a binary table extension, see
+                ``tblext``. All fluxes are expected to be in units of
+                flux density.
+            fluxunits (:obj:`str`, optional):
+                Units of the flux density in the fits file. If None,
+                the code will check the header of the flux extension
+                (or the binary table extension; see ``tblext``) for
+                the ``BUNIT`` keyword. If not None, this overrides
+                any units provided by the fits file. If None and no
+                ``BUNIT`` keyword is found, the units are assumed to
+                be ``'1e-17 erg / (cm2 s angstrom)'``.
+            errext (:obj:`str`, :obj:`int`, optional):
+                Extension with the flux error. If None, no errors
+                will be read. Keyword is mutually exclusive with
+                ``ivarext``. If the data is instead one column in a
+                binary table extension, see ``tblext``.
+            ivarext (:obj:`str`, :obj:`int`, optional):
+                Extension with the flux inverse variance. If None, no
+                errors will be read. Otherwise, the data are read and
+                then converted to 1-sigma errors. Keyword is mutually
+                exclusive with ``errext``. If the data is instead one
+                column in a binary table extension, see ``tblext``.
+            maskext (:obj:`str`, :obj:`int`, optional):
+                Extension with the mask data. If not None, the data
+                in this extension must be castable to a boolean
+                array. If None, all spectral data is assumed to be
+                unmasked. If the data is instead one column in a
+                binary table extension, see ``tblext``.
+            resext (:obj:`str`, :obj:`int`, optional):
+                Extension with the spectral resolution. If None, the
+                spectral resolution will be undefined. If the data is
+                instead one column in a binary table extension, see
+                ``tblext``.
+            tblext (:obj:`str`, :obj:`int`, optional):
+                Instead of being organized in a series of ImageHDU
+                extensions, the spectral data are in a BinTableHDU
+                with this extension name/index. If provided (not
+                None), the "extension" names/indices provided by the
+                other keywords are instead interpreted as the columns
+                in this binary table.
+            **kwargs:
+                Keyword arguments passed directly to the class
+                instantiation (see :class:`Spectrum`). NOTE: If
+                ``resolution`` is provided as one of the kwargs, it
+                is given priority over the ``resext`` keyword in this
+                method.
+
+        Returns:
+            :class:`Spectrum`: Object read from the fits file.
+
+        Raises:
+            ValueError:
+                Raised if both ``errext`` and ``ivarext`` are set, or
+                if the wavelength vector is supposed to be built from
+                a WCS, but the data is organized in a binary table.
         """
-        hdu = fits.open(fitsfile)
-        wave = hdu[waveext].data
-        flux = hdu[fluxext].data
-        sres = None if resext is None else hdu[resext].data
-        return cls(wave, flux, resolution=sres)
+        # Check the input
+        if waveext.lower() == 'wcs' and tblext is not None:
+            raise ValueError('WCS cannot be used to define the wavelength coordinate system '
+                             'using a binary table data model.')
+        if ivarext is not None and errext is not None:
+            raise ValueError('An extensions/column can be provided for the inverse variance or '
+                             'the error, not both.')
+        _resext = resext
+        if 'resolution' in kwargs and kwargs['resolution'] is not None and resext is not None:
+            warnings.warn('Resolution and extension provided.  Preference given to the former.')
+            _resext = None
+
+        hdu = fits.open(ifile)
+        # Get the flux
+        flux = hdu[fluxext].data if tblext is None else hdu[tblext].data[fluxext]
+        # Check the dimensionality
+        if flux.ndim != 1:
+            raise ValueError('Flux data must be one-dimensional.')
+
+        # Get the mask. This needs to be instantiated before the error
+        # vector, in case the mask incorporates ivar-to-error
+        # conversion issues.
+        mask = None if maskext is None \
+                    else (hdu[maskext].data.astype(bool) if tblext is None 
+                          else hdu[tblext].data[errext].astype(bool))
+
+        # Get the error
+        error = None if errext is None \
+                    else (hdu[errext].data if tblext is None else hdu[tblext].data[errext])
+        if ivarext is not None:
+            error = numpy.ma.power(hdu[ivarext].data if tblext is None 
+                                    else hdu[tblext].data[ivarext], -0.5)
+            if mask is not None:
+                mask |= error.mask
+            error = error.data
+
+        # Get the wavelength vector
+        if waveext.lower() == 'wcs':
+            wave = Spectrum.wcs_wavelength_vector(WCS(header=hdu[fluxext].header, fix=True),
+                                                  flux.size)
+        else:
+            wave = hdu[waveext].data if tblext is None else hdu[tblext].data[waveext]
+        # Impose the wavelength units
+        wave *= astropy.units.Unit(waveunits).to('angstrom')
+
+        # Fix the flux units
+        if fluxunits is None:
+            if tblext is not None and 'BUNIT' in hdu[tblext].header:
+                fluxunits = hdu[tblext].header['BUNIT']
+            elif 'BUNIT' in hdu[fluxext].header:
+                fluxunits = hdu[fluxext].header['BUNIT']
+        if fluxunits is not None:
+            print('Converting flux units from {0} to 1e-17 erg/s/cm2/angstrom'.format(fluxunits))
+            if error is None:
+                flux = convert_flux_units(wave, flux, fluxunits)
+            else:
+                flux, error = convert_flux_units(wave, flux, fluxunits, error=error)
+
+        # Get the spectral resolution
+        sres = None if _resext is None \
+                    else (hdu[_resext].data if tblext is None else hdu[tblext].data[_resext])
+        return cls(wave, flux, error=error, mask=mask, **kwargs) if sres is None \
+                else cls(wave, flux, error=error, mask=mask, resolution=sres, **kwargs)
+
+    @classmethod
+    def from_ascii(cls, ifile, wavecol=0, waveunits='angstrom', fluxcol=1, errcol=None,
+                   ivarcol=None, maskcol=None, rescol=None, **kwargs):
+        """
+        Construct a spectrum using data from an ascii file.
+
+        .. note::
+
+            - All the columns are 0-indexed. I.e., the first column
+              is column 0.
+            - The core function used to read the data is
+              `numpy.genfromtxt`_; i.e., anything that can be parsed
+              by that function (e.g., gzipped files), can be parsed
+              by this method. Note that all columns are read as
+              floats. This means that any string columns are
+              converted to nan, and any mask column must have the
+              typical cast of 0 for False and anything else for True.
+
+        Args:
+            ifile (:obj:`str`):
+                Name of the fits file.
+            wavecol (:obj:`int`, optional):
+                Column index with the wavelength data.
+            fluxcol (:obj:`int`, optional):
+                Column index with the flux data.
+            errcol (:obj:`int`, optional):
+                Column index with the flux error. If None, no errors
+                will be read. Keyword is mutually exclusive with
+                ``ivarcol``.
+            ivarcol (:obj:`int`, optional):
+                Column index with the flux inverse variance. If None,
+                no errors will be read. Otherwise, the data are read
+                and then converted to 1-sigma errors. Keyword is
+                mutually exclusive with ``errcol``.
+            maskcol (:obj:`int`, optional):
+                Column index with the mask data. If not None, the
+                data in this extension must be castable to a boolean
+                array. If None, all spectral data is assumed to be
+                unmasked.
+            rescol (:obj:`str`, :obj:`int`, optional):
+                Column index with the spectral resolution. If None,
+                the spectral resolution will be undefined.
+            **kwargs:
+                Keyword arguments passed directly to the class
+                instantiation (see :class:`Spectrum`).
+
+        Returns:
+            :class:`Spectrum`: Object read from the ascii file.
+
+        Raises:
+            ValueError:
+                Raised if both ``errcol`` and ``ivarcol`` are set.
+        """
+        # Check the input
+        if ivarcol is not None and errcol is not None:
+            raise ValueError('A column can be provided for the inverse variance or '
+                             'the error, not both.')
+        _rescol = rescol
+        if 'resolution' in kwargs and kwargs['resolution'] is not None and rescol is not None:
+            warnings.warn('Resolution and column provided.  Preference given to the former.')
+            _rescol = None
+
+        db = numpy.genfromtxt(ifile)
+        flux = db[:,fluxcol]
+        # Check the dimensionality
+        if flux.ndim != 1:
+            raise ValueError('Flux data must be one-dimensional.')
+        wave = db[:,wavecol] * astropy.units.Unit(waveunits).to('angstrom')
+        error = None if errcol is None else db[:,errcol]
+        mask = None if maskcol is None else db[:,maskcol].astype(bool)
+        if ivarcol is not None:
+            error = numpy.ma.power(db[:,ivarcol], -0.5)
+            if mask is not None:
+                mask |= error.mask
+            error = error.data
+        sres = None if _rescol is None else db[:,_rescol]
+        return cls(wave, flux, error=error, mask=mask, **kwargs) if sres is None \
+                else cls(wave, flux, error=error, mask=mask, resolution=sres, **kwargs)
 
     def wavelength_step(self):
         """
         Return the wavelength step per pixel.
 
-        TODO: FIX THIS!!  It shouldn't use spectral_coordinate_step to get the mean dw.
+        Returns:
+            `numpy.ndarray`_: Change in angstroms per pixel.
         """
-        return angstroms_per_pixel(self.wave, log=self.log, regular=True)
-#        # TODO: Lazy load and then keep this?
-#        dw = spectral_coordinate_step(self.wave, log=self.log)
-#        if self.log:
-#            dw *= numpy.log(10.)*self.wave
-#        return dw
+        return angstroms_per_pixel(self.wave, log=self.log, regular=self.regular)
 
     def frequency_step(self):
         """
@@ -396,6 +807,7 @@ class Spectrum:
         """
         if wavelength is not None and band is not None:
             warnings.warn('Provided both wavelength and band; wavelength takes precedence.')
+
         # TODO: Check input.
         if system == 'AB':
             if self.nu is None:
@@ -410,7 +822,34 @@ class Spectrum:
                 fnu = numpy.sum(band(self.wave)*self.fnu*dnu) / numpy.sum(band(self.wave)*dnu)
             else:
                 fnu = self.fnu
-            return -2.5*numpy.log10(fnu*1e-29) - 48.6
+            # NOTE: This is identically -2.5*numpy.log10(fnu) - 48.6,
+            # just accounting for the units of fnu
+            return -2.5*numpy.log10(fnu) + 23.9
+
+        if system == 'Vega':
+            # NOTE: 
+            #   - Vega mags are done brute force, not using a
+            #     precomputed set of zero-points.
+            #   - This doesn't account for any resolution differences
+            #     between this spectrum and the Vega spectrum.
+            if self._vega is None:
+                # Lazy load the Vega spectrum
+                self._vega = VegaSpectrum()
+            if wavelength is not None:
+                # At one wavelength
+                vega_flux = self._vega.flux[numpy.argmin(numpy.absolute(self._vega.wave
+                                                                        - wavelength))]
+                flux = self.flux[numpy.argmin(numpy.absolute(self.wave - wavelength))]
+            elif band is not None:
+                # Over a band
+                vega_flux = numpy.sum(band(self.wave) * self.wave * self._vega.interp(self.wave)
+                                      * self.wavelength_step())
+                flux = numpy.sum(band(self.wave) * self.wave * self.flux * self.wavelength_step())
+            else:
+                # Full spectrum
+                flux = self.flux
+                vega_flux = self._vega.interp(self.wave)
+            return -2.5 * numpy.log10(flux / vega_flux) + 0.03
 
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
@@ -439,6 +878,13 @@ class Spectrum:
         Rescale the spectrum to be specifically the flux value at the
         provided wavelength. The input flux should be in units of
         1e-17 erg/s/cm^2/angstrom.
+
+        Args:
+            wave (:obj:`float`):
+                The wavelength at which to base the rescaling.
+            flux (:obj:`float`):
+                The target value of the flux at the provided
+                wavelength.
         """
         return self.rescale(flux/self.interp(wave))
 
@@ -468,7 +914,7 @@ class Spectrum:
         if wavelength is None and band is None:
             raise ValueError('Must provide either wavelength or the bandpass filter.')
         dmag = new_mag - self.magnitude(wavelength=wavelength, band=band, system=system)
-        if system == 'AB':
+        if system in ['AB', 'Vega']:
             return self.rescale(numpy.power(10., -dmag/2.5))
         raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
 
@@ -493,30 +939,103 @@ class Spectrum:
             pyplot.show()
         return _ax
 
-    def resample(self, wave, log=False):
+    def resample(self, wave=None, dwave=None, log=False, step=True):
         """
-        Resample the spectrum to a new wavelength array.
+        Resample the spectrum to a uniform wavelength grid.
 
         Args:
-            wave (`numpy.ndarray`_):
+            wave (`numpy.ndarray`_, optional):
                 New wavelength array. Must be linearly or
-                log-linearly sampled.
+                log-linearly sampled. If None, the new wavelength
+                grid covers the full extent of the current grid with
+                a sampling based in the minimum pixel separation
+                (geometrically or linearly) in the current spectrum.
+            dwave (:obj:`float`, optional):
+                Step for each pixel. If ``log`` is True, this must be
+                the geometric step; i.e., the difference in the
+                base-10 log of the wavelength of adjacent pixels.
             log (:obj:`bool`, optional):
                 Flag that the wavelength array is log-linearly
                 sampled.
+            step (:obj:`bool`, optional):
+                Treat the input function as a step function during
+                the resampling integration. If False, use a linear
+                interpolation between pixel samples.
 
         Returns:
-            :class:`Spectrum`: Returns a a resampled version of
-            itself. TODO: The resampled version currently looses any
-            error or resolution vectors...
+            :class:`Spectrum`: Returns a resampled version of itself.
         """
-        # TODO: Make this better!
-        rng = wave[[0,-1]]
-        if log:
-            rng = numpy.log10(rng)
-        r = Resample(self.flux, x=self.wave, inLog=self.log, newRange=rng, newpix=wave.size,
-                     newLog=log)
-        return Spectrum(r.outx, r.outy, log=log)
+        if wave is None:
+            wave = self.wave
+        rng = numpy.log10(wave[[0,-1]]) if log else wave[[0,-1]]
+        if dwave is None:
+            dwave = numpy.amin(numpy.diff(numpy.log10(wave))) \
+                        if log else numpy.amin(numpy.diff(wave))
+        npix = int(numpy.diff(rng)/dwave)+1
+        r = Resample(self.flux, e=self.error, mask=self.mask, x=self.wave,
+                     inLog=self.regular and self.log, newRange=wave[[0,-1]], newpix=npix,
+                     newLog=log, step=step)
+        sres = None if self.sres is None \
+                    else interpolate.interp1d(self.wave, self.sres, assume_sorted=True,
+                                              bounds_error=False,
+                                              fill_value=(self.sres[0],self.sres[-1]))(r.outx)
+        return Spectrum(r.outx, r.outy, error=r.oute, mask=r.outf < 0.8, resolution=sres,
+                        use_sampling_assessments=True)
+
+    def match_resolution(self, resolution, wave=None):
+        r"""
+        Match the spectral resolution of the spectrum to the provided
+        value.
+
+        The object must be a regularly sampled, either linearly or
+        log-linearly (see :attr:`log`). If it isn't, use
+        :func:`resample`.
+
+        Args:
+            resolution (:obj:`float`, array-like):
+                The single value for the spectral resolution
+                (:math:`R=\lambda/\Delta\lambda`) or a vector for a
+                wavelength-dependent spectral resolution. If a
+                vector, the length of the vector must exactly match
+                the wavelength vector of the object or the wavelength
+                vector must also be provided (see ``wave``).
+            wave (`numpy.ndarray`_, optional):
+                Wavelength vector for the provided spectral
+                resolution. If None, ``resolution`` must either be a
+                single number or a vector with the same length as
+                :attr:`wave`.
+
+        Returns:
+            :class:`Spectrum`: Returns an object with the spectral
+            resolution matched (as best as can be done). If
+            necessary, the spectrum is masked where the spectral
+            resolution could not be matched in detail.
+        """
+        if not self.regular:
+            raise ValueError('The spectrum must be regularly binned; try running resample first.')
+        if wave is None:
+            wave = self.wave
+        new_sres = numpy.atleast_1d(resolution)
+        if new_sres.size == 1:
+            new_sres = numpy.full(self.wave.size, resolution, dtype=float)
+        if new_sres.size != wave.size:
+            raise ValueError('Spectral resolution does not match length of wavelength vector.')
+
+        ivar = None if self.error is None else numpy.ma.power(self.error, -2).data
+        new_flux, new_sres, _, new_mask, new_ivar \
+                = match_spectral_resolution(self.wave, self.flux, self.sres, wave, new_sres,
+                                            ivar=ivar, mask=self.mask, log10=self.log,
+                                            new_log10=self.log)
+        new_mask |= numpy.invert(new_flux > 0)
+
+        if new_ivar is None:
+            new_error = None
+        else:
+            new_error = numpy.ma.power(new_ivar, -0.5)
+            new_mask |= new_error.mask
+            new_error = new_error.data    
+        return Spectrum(self.wave, new_flux, error=new_error, mask=new_mask, resolution=new_sres,
+                        use_sampling_assessments=True)
 
     def redshift(self, z):
         """
@@ -525,9 +1044,31 @@ class Spectrum:
         Spectrum is in 1e-17 erg/s/cm^2/angstrom, so this shifts the
         wavelength vector by 1+z and rescales the flux by 1+z to keep
         the flux per *observed* wavelength.  S/N is kept fixed.
+
+        Args:
+            z (:obj:`float`):
+                Target redshift
         """
         self.interpolator.x *= (1+z)
         self.rescale(1/(1+z))
+
+    def write(self, ofile, overwrite=False):
+        """
+        Write the spectrum to a fits file.
+        """
+        if os.path.isfile(ofile) and not overwrite:
+            raise FileExistsError('File exists. Use a different filename or set overwrite=True.')
+        
+        hdu = fits.HDUList([fits.PrimaryHDU(),
+                            fits.ImageHDU(name='WAVE', data=self.wave),
+                            fits.ImageHDU(name='FLUX', data=self.flux)])
+        if self.error is not None:
+            hdu += [fits.ImageHDU(name='ERROR', data=self.error)]
+        if self.mask is not None:
+            hdu += [fits.ImageHDU(name='MASK', data=self.mask.astype(int))]
+        if self.sres is not None:
+            hdu += [fits.ImageHDU(name='SPECRES', data=self.sres)]
+        hdu.writeto(ofile, overwrite=True)
 
 
 class EmissionLineSpectrum(Spectrum):
@@ -677,7 +1218,7 @@ class RedGalaxySpectrum(Spectrum):
         hdu = fits.open(fitsfile)
         wave = hdu['WAVE'].data * (1+redshift)
         flux = hdu['FLUX'].data
-        super(RedGalaxySpectrum, self).__init__(wave, flux)
+        super(RedGalaxySpectrum, self).__init__(wave, flux, log=True)
 
     @classmethod
     def from_file(cls):
@@ -704,9 +1245,38 @@ class ABReferenceSpectrum(Spectrum):
     Inherits from :class:`Spectrum`, which we take to mean that the flux
     is always in units of 1e-17 erg/s/cm^2/angstrom.
     """
-    def __init__(self, wave, resolution=None, log=False):
+    def __init__(self, wave, resolution=None, log=False, regular=True):
         norm = numpy.power(10., 29 - 48.6/2.5)  # Reference flux in microJanskys
         fnu = numpy.full_like(wave, norm, dtype=float)
         flambda = convert_flux_density(wave, fnu, density='Hz')
-        super(ABReferenceSpectrum, self).__init__(wave, flambda, resolution=resolution, log=log)
+        super(ABReferenceSpectrum, self).__init__(wave, flambda, resolution=resolution, log=log,
+                                                  regular=regular)
+
+
+class VegaSpectrum(Spectrum):
+    """
+    Return the spectrum of Vega constructed using data from:
+
+    https://ssb.stsci.edu/cdbs/calspec/alpha_lyr_stis_009.fits
+
+    Downloaded on 3 Apr 2020.  Wavelengths are in vacuum.
+
+    Args:
+        waverange (array-like, optional):
+            Used to limit the wavelength range of the returned
+            spectrum. The maximum wavelength range of the current
+            spectrum goes from 900 Angstrom to 300 microns.
+    """
+    def __init__(self, waverange=None):
+        if waverange is not None and numpy.asarray(waverange).size != 2:
+            raise ValueError('Wavelength range must be a two-element list, tuple, etc.')
+        fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/spectra/alpha_lyr_stis_009.fits')
+        hdu = fits.open(fitsfile)
+        indx = numpy.ones(hdu[1].data['WAVELENGTH'].size, dtype=bool) if waverange is None \
+                    else (hdu[1].data['WAVELENGTH'] > waverange[0]) \
+                            & (hdu[1].data['WAVELENGTH'] < waverange[1])
+        resolution=hdu[1].data['WAVELENGTH']/hdu[1].data['FWHM']
+        super(VegaSpectrum, self).__init__(hdu[1].data['WAVELENGTH'][indx],
+                                           hdu[1].data['FLUX'][indx]*1e17,
+                                           resolution=resolution[indx], regular=False)
 
