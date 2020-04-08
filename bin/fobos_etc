@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
-from enyo.scripts import fobos_snr
+from enyo.scripts import fobos_etc
 import sys
 
 if __name__ == '__main__':
-    sys.exit(fobos_snr.main(fobos_snr.parse_args()))
+    sys.exit(fobos_etc.main(fobos_etc.parse_args()))
 
