@@ -19,7 +19,8 @@ from enyo.etc.observe import Observation
 
 def parse_args(options=None):
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='FOBOS Exposure Time Calculator (v0.2)',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('--spec_file', default=None, type=str,
                         help='A fits or ascii file with the object spectrum to use')
@@ -29,6 +30,11 @@ def parse_args(options=None):
                         help='Wavelength units')
     parser.add_argument('--spec_flux', default='FLUX',
                         help='Extension or column number with the flux.')
+    parser.add_argument('--spec_flux_units', default=None,
+                        help='Input units of the flux density. Must be interpretable by '
+                             'astropy.units.Unit.  Code assumes 1e-17 erg / (cm2 s angstrom) '
+                             'if units are not provided.')
+
     res_group = parser.add_mutually_exclusive_group()
     res_group.add_argument('--spec_res_indx', default=None,
                            help='Extension or column number with the flux.')
@@ -38,11 +44,15 @@ def parse_args(options=None):
     parser.add_argument('--spec_table', default=None,
                         help='Extension in the fits file with the binary table data.')
 
-    parser.add_argument('-w', '--wavelengths', default=[3100,10000,4e-5], nargs=3, type=float,
-                        help='Wavelength grid: start wave, approx end wave, logarithmic step.')
+#    parser.add_argument('-w', '--wavelengths', default=[3100,10000,4e-5], nargs=3, type=float,
+#                        help='Wavelength grid: start wave, approx end wave, logarithmic step')
     parser.add_argument('-m', '--mag', default=24., type=float,
-                        help='Object apparent AB magnitude; assumed spectrum has a constant AB '
-                             'otherwise, it is assumed to be the total magnitude of the source.')
+                        help='Total apparent magnitude of the source')
+    parser.add_argument('--mag_band', default='g', type=str,
+                        help='Broad-band used for the provided magnitude.  Must be '
+                             'u, g, r, i, or z.')
+    parser.add_argument('--mag_system', default='AB', type=str,
+                        help='Magnitude system.  Must be either AB or Vega.')
 
     parser.add_argument('-z', '--redshift', default=0.0, type=float,
                         help='Redshift of the object, z')
@@ -102,8 +112,8 @@ def get_wavelength_vector(start, end, logstep):
     return numpy.power(10., numpy.arange(nwave)*logstep + numpy.log10(start))
 
 
-def read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_indx, spec_res_value,
-                  spec_table, wave, resolution):
+def read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_flux_units, spec_res_indx,
+                  spec_res_value, spec_table, wave, resolution):
     """
     """
     if not os.path.isfile(spec_file):
@@ -113,7 +123,8 @@ def read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_ind
     # First assume it's a fits file
     try:
         spec = spectrum.Spectrum.from_fits(spec_file, waveext=spec_wave, waveunits=spec_wave_units,
-                                           fluxext=spec_flux, resext=spec_res, tblext=spec_table,
+                                           fluxext=spec_flux, fluxunits=spec_flux_units,
+                                           resext=spec_res, tblext=spec_table,
                                            resolution=spec_res_value,
                                            use_sampling_assessments=True)
     except:
@@ -125,7 +136,8 @@ def read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_ind
             rescol = None if spec_res_indx is None else int(spec_res_indx)
             spec = spectrum.Spectrum.from_ascii(spec_file, wavecol=int(spec_wave),
                                                 waveunits=spec_wave_units, fluxcol=int(spec_flux),
-                                                rescol=rescol, resolution=spec_res_value,
+                                                fluxunits=spec_flux_units, rescol=rescol,
+                                                resolution=spec_res_value,
                                                 use_sampling_assessments=True)
         except:
             spec = None
@@ -152,25 +164,27 @@ def read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_ind
     return spec.resample(wave=wave, log=True)
 
 
-def get_spectrum(wave, mag, spec_file=None, spec_wave=None, spec_wave_units=None, spec_flux=None,
-                 spec_res_indx=None, spec_res_value=None, spec_table=None, emline_db=None,
-                 redshift=0.0, resolution=3500):
+def get_spectrum(wave, mag, mag_band='g', mag_system='AB', spec_file=None, spec_wave=None,
+                 spec_wave_units=None, spec_flux=None, spec_flux_units=None, spec_res_indx=None,
+                 spec_res_value=None, spec_table=None, emline_db=None, redshift=0.0,
+                 resolution=3500):
     """
     """
     spec = spectrum.ABReferenceSpectrum(wave, resolution=resolution, log=True) \
                 if spec_file is None \
-                else read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux, spec_res_indx,
-                                   spec_res_value, spec_table, wave, resolution)
-    g = efficiency.FilterResponse()
-    spec.rescale_magnitude(mag, band=g)
+                else read_spectrum(spec_file, spec_wave, spec_wave_units, spec_flux,
+                                   spec_flux_units, spec_res_indx, spec_res_value, spec_table,
+                                   wave, resolution)
+    broadband = efficiency.FilterResponse(band=mag_band)
+    spec.rescale_magnitude(mag, band=broadband, system=mag_system)
     if emline_db is None:
         return spec
     spec = spectrum.EmissionLineSpectrum(wave, emline_db['flux'], emline_db['restwave'],
                                          emline_db['fwhm'], units=emline_db['fwhmu'],
                                          redshift=redshift, resolution=resolution, log=True,
                                          continuum=spec.flux)
-    warnings.warn('Including emission lines, spectrum g-band magnitude changed '
-                  'from {0} to {1}.'.format(mag, spec.magnitude(band=g)))
+    warnings.warn('Including emission lines, spectrum broadband magnitude changed '
+                  'from {0} to {1}.'.format(mag, spec.magnitude(band=broadband)))
     return spec
 
 
@@ -224,13 +238,15 @@ def main(args):
     # source spectrum is assumed to be
     #   - normalized by the total integral of the source flux 
     #   - independent of position within the source
-    wave = get_wavelength_vector(args.wavelengths[0], args.wavelengths[1], args.wavelengths[2])
+    wavelengths = [3100,10000,4e-5]
+    wave = get_wavelength_vector(wavelengths[0], wavelengths[1], wavelengths[2])
     emline_db = None if args.emline is None else read_emission_line_database(args.emline)
-    spec = get_spectrum(wave, args.mag, spec_file=args.spec_file, spec_wave=args.spec_wave,
+    spec = get_spectrum(wave, args.mag, mag_band=args.mag_band, mag_system=args.mag_system,
+                        spec_file=args.spec_file, spec_wave=args.spec_wave,
                         spec_wave_units=args.spec_wave_units, spec_flux=args.spec_flux,
-                        spec_res_indx=args.spec_res_indx, spec_res_value=args.spec_res_value,
-                        spec_table=args.spec_table, emline_db=emline_db, redshift=args.redshift,
-                        resolution=resolution)
+                        spec_flux_units=args.spec_flux_units, spec_res_indx=args.spec_res_indx,
+                        spec_res_value=args.spec_res_value, spec_table=args.spec_table,
+                        emline_db=emline_db, redshift=args.redshift, resolution=resolution)
 
     # Get the source distribution.  If the source is uniform, onsky is None.
     onsky = get_source_distribution(args.fwhm, args.uniform, args.sersic)
@@ -336,11 +352,11 @@ def main(args):
         pyplot.show()
 
     # Report
-    g = efficiency.FilterResponse()
+    g = efficiency.FilterResponse(band='g')
     r = efficiency.FilterResponse(band='r')
     iband = efficiency.FilterResponse(band='i')
     print('-'*70)
-    print('{0:^70}'.format('FOBOS S/N Calculation (v0.1)'))
+    print('{0:^70}'.format('FOBOS S/N Calculation (v0.2)'))
     print('-'*70)
     print('Compute time: {0} seconds'.format(time.perf_counter() - t))
     print('Object g- and r-band AB magnitude: {0:.1f} {1:.1f}'.format(

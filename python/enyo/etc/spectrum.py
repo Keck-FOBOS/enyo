@@ -570,11 +570,12 @@ class Spectrum:
                 ``tblext``. All fluxes are expected to be in units of
                 flux density.
             fluxunits (:obj:`str`, optional):
-                Units of the flux density in the fits file. If None,
-                the code will check the header of the flux extension
-                (or the binary table extension; see ``tblext``) for
-                the ``BUNIT`` keyword. If not None, this overrides
-                any units provided by the fits file. If None and no
+                Units of the flux density in the fits file. Must be
+                interpretable by `astropy.units.Unit`_. If None, the
+                code will check the header of the flux extension (or
+                the binary table extension; see ``tblext``) for the
+                ``BUNIT`` keyword. If not None, this overrides any
+                units provided by the fits file. If None and no
                 ``BUNIT`` keyword is found, the units are assumed to
                 be ``'1e-17 erg / (cm2 s angstrom)'``.
             errext (:obj:`str`, :obj:`int`, optional):
@@ -687,8 +688,9 @@ class Spectrum:
                 else cls(wave, flux, error=error, mask=mask, resolution=sres, **kwargs)
 
     @classmethod
-    def from_ascii(cls, ifile, wavecol=0, waveunits='angstrom', fluxcol=1, errcol=None,
-                   ivarcol=None, maskcol=None, rescol=None, **kwargs):
+    def from_ascii(cls, ifile, wavecol=0, waveunits='angstrom', fluxcol=1,
+                   fluxunits='1e-17 erg / (cm2 s angstrom)', errcol=None, ivarcol=None,
+                   maskcol=None, rescol=None, **kwargs):
         """
         Construct a spectrum using data from an ascii file.
 
@@ -711,6 +713,11 @@ class Spectrum:
                 Column index with the wavelength data.
             fluxcol (:obj:`int`, optional):
                 Column index with the flux data.
+            fluxunits (:obj:`str`, optional):
+                Units of the flux density read from the file. Must be
+                interpretable by `astropy.units.Unit`_. If None,
+                units are assumed to be ``'1e-17 erg / (cm2 s
+                angstrom)'``.
             errcol (:obj:`int`, optional):
                 Column index with the flux error. If None, no errors
                 will be read. Keyword is mutually exclusive with
@@ -754,13 +761,19 @@ class Spectrum:
         if flux.ndim != 1:
             raise ValueError('Flux data must be one-dimensional.')
         wave = db[:,wavecol] * astropy.units.Unit(waveunits).to('angstrom')
-        error = None if errcol is None else db[:,errcol]
         mask = None if maskcol is None else db[:,maskcol].astype(bool)
+        error = None if errcol is None else db[:,errcol]
         if ivarcol is not None:
             error = numpy.ma.power(db[:,ivarcol], -0.5)
             if mask is not None:
                 mask |= error.mask
             error = error.data
+        if fluxunits is not None:
+            print('Converting flux units from {0} to 1e-17 erg/s/cm2/angstrom'.format(fluxunits))
+            if error is None:
+                flux = convert_flux_units(wave, flux, fluxunits)
+            else:
+                flux, error = convert_flux_units(wave, flux, fluxunits, error=error)
         sres = None if _rescol is None else db[:,_rescol]
         return cls(wave, flux, error=error, mask=mask, **kwargs) if sres is None \
                 else cls(wave, flux, error=error, mask=mask, resolution=sres, **kwargs)
@@ -795,7 +808,8 @@ class Spectrum:
             band (:class:`~enyo.etc.efficiency.FilterResponse`, optional):
                 Object with the filter response function
             system (:obj:`str`, optional):
-                Photometric system.  Currently must be ``AB``.
+                Photometric system. Currently must be ``AB`` or
+                ``Vega``.
 
         Returns:
             :obj:`float`, `numpy.ndarray`_: The one or more magnitude
@@ -903,7 +917,8 @@ class Spectrum:
             band (:class:`~enyo.etc.efficiency.FilterResponse`, optional):
                 Object with the filter response function
             system (:obj:`str`, optional):
-                Photometric system.  Currently must be ``AB``.
+                Photometric system. Currently must be ``AB`` or
+                ``Vega``.
 
         Raises:
             ValueError:
