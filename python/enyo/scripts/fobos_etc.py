@@ -54,6 +54,15 @@ def parse_args(options=None):
     parser.add_argument('--mag_system', default='AB', type=str,
                         help='Magnitude system.  Must be either AB or Vega.')
 
+    parser.add_argument('--sky_mag', default=None, type=float,
+                        help='Surface brightness of the sky in mag/arcsec^2 in the defined '
+                             'broadband.  If not provided, default dark-sky spectrum is used.')
+    parser.add_argument('--sky_mag_band', default='g', type=str,
+                        help='Broad-band used for the provided sky surface brightness.  Must be '
+                             'u, g, r, i, or z.')
+    parser.add_argument('--sky_mag_system', default='AB', type=str,
+                        help='Magnitude system.  Must be either AB or Vega.')
+
     parser.add_argument('-z', '--redshift', default=0.0, type=float,
                         help='Redshift of the object, z')
     parser.add_argument('-l', '--emline', default=None, type=str,
@@ -188,6 +197,16 @@ def get_spectrum(wave, mag, mag_band='g', mag_system='AB', spec_file=None, spec_
     return spec
 
 
+def get_sky_spectrum(mag=None, mag_band='g', mag_system='AB'):
+    sky_spec = spectrum.MaunakeaSkySpectrum()
+    if mag is None:
+        return sky_spec
+
+    broadband = efficiency.FilterResponse(band=mag_band)
+    sky_spec.rescale_magnitude(mag, band=broadband, system=mag_system)
+    return sky_spec
+
+
 def get_source_distribution(fwhm, uniform, sersic):
     if uniform:
         return None
@@ -257,8 +276,9 @@ def main(args):
 #        pyplot.show()
 
     # Get the sky spectrum
-    sky_spectrum = spectrum.MaunakeaSkySpectrum()
-
+    sky_spectrum = get_sky_spectrum(args.sky_mag, mag_band=args.sky_mag_band,
+                                    mag_system=args.sky_mag_system)
+    
     # Overplot the source and sky spectrum
 #    ax = spec.plot()
 #    ax = sky_spectrum.plot(ax=ax, show=True)
