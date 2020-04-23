@@ -1240,13 +1240,34 @@ class RedGalaxySpectrum(Spectrum):
         raise NotImplementedError('Spectrum for red galaxy is fixed.')
 
 
+#class MaunakeaSkySpectrumOLD(Spectrum):
+#    def __init__(self):
+#        fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/sky/manga/apo2maunakeasky.fits')
+#        hdu = fits.open(fitsfile)
+#        wave = hdu['WAVE'].data
+#        flux = hdu['FLUX'].data
+#        super(MaunakeaSkySpectrumOLD, self).__init__(wave, flux, log=True)
+#
+#    @classmethod
+#    def from_file(cls):
+#        raise NotImplementedError('Maunakea sky spectrum is fixed.')
+
+
 class MaunakeaSkySpectrum(Spectrum):
     def __init__(self):
-        fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/sky/manga/apo2maunakeasky.fits')
-        hdu = fits.open(fitsfile)
-        wave = hdu['WAVE'].data
-        flux = hdu['FLUX'].data
-        super(MaunakeaSkySpectrum, self).__init__(wave, flux, log=True)
+        fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/sky/lris_esi_skyspec_fnu.fits')
+        init = Spectrum.from_fits(fitsfile, waveext='WCS', fluxext=0, airwave=True,
+                                  use_sampling_assessments=True)
+        init.regular = False
+        init.log = False
+        wave = numpy.arange(3100., 10500., 2.)
+        init = init.resample(wave=wave, dwave=2., log=False)
+        wave = init.wave
+        flux = init.flux
+        indx = numpy.invert(flux > 0) # & (wave < 3210)
+        flux[indx] = numpy.median(flux[(wave > 3210) & (wave < 4000)])
+        super(MaunakeaSkySpectrum, self).__init__(wave, flux)
+
 
     @classmethod
     def from_file(cls):
