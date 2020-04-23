@@ -35,6 +35,9 @@ def parse_args(options=None):
                              'astropy.units.Unit.  Code assumes 1e-17 erg / (cm2 s angstrom) '
                              'if units are not provided.')
 
+    parser.add_argument('--spot_fwhm', default=5.8, type=float,
+                        help='FHWM of the monochromatic spot size on the detector in pixels.')
+
     res_group = parser.add_mutually_exclusive_group()
     res_group.add_argument('--spec_res_indx', default=None,
                            help='Extension or column number with the flux.')
@@ -250,14 +253,15 @@ def main(args):
 
     # Temporary numbers that assume a given spectrograph PSF and LSF.
     # Assume 3 pixels per spectral and spatial FWHM.
-    spatial_fwhm = 3.0
-    spectral_fwhm = 3.0
+    spatial_fwhm = args.spot_fwhm
+    spectral_fwhm = args.spot_fwhm
 
     # Get source spectrum in 1e-17 erg/s/cm^2/angstrom. Currently, the
     # source spectrum is assumed to be
     #   - normalized by the total integral of the source flux 
     #   - independent of position within the source
-    wavelengths = [3100,10000,4e-5]
+    dw = 1/spectral_fwhm/resolution/numpy.log(10)
+    wavelengths = [3100,10000,dw]
     wave = get_wavelength_vector(wavelengths[0], wavelengths[1], wavelengths[2])
     emline_db = None if args.emline is None else read_emission_line_database(args.emline)
     spec = get_spectrum(wave, args.mag, mag_band=args.mag_band, mag_system=args.mag_system,
