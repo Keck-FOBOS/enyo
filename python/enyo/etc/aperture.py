@@ -264,7 +264,6 @@ class Aperture:
 
         return sx, ex, dx, sy, ey, dy
 
-
     def _overlapping_grid_polygons(self, x, y):
         r"""
         Construct the list grid-cell polygons (rectangles) that are
@@ -497,11 +496,14 @@ class SlitAperture(Aperture):
             Slit width
         length (float):
             Slit length
+        rotation (float):
+            Slit rotation (deg)
     """
     def __init__(self, cx, cy, width, length, rotation=0.):
         self.center = [cx,cy]
         self.width = width
         self.length = length
+        self.rotation = rotation
         x = numpy.array([-width/2, width/2])+cx
         y = numpy.array([-length/2, length/2])+cy
         square = asPolygon(numpy.append(numpy.roll(numpy.repeat(x,2),-1),

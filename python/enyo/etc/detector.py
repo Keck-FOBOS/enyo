@@ -19,7 +19,7 @@ class Detector(Efficiency):
             spectral axis and number of pixels along the spatial
             axis.  Can be None, but limits use if it is.
         pixelsize (:obj:`float`, optional):
-            The size of the (square) detector pixels in *mm*.
+            The size of the (square) detector pixels in *micron*.
         rn (:obj:`float`, optional):
             Read-noise in electrons.
         dark (:obj:`float`, optional):
@@ -37,7 +37,7 @@ class Detector(Efficiency):
     # TODO: Allow for multiple amplifiers per detector? Would also need
     # to define amplifier section.
     # TODO: Define overscan and data sections
-    def __init__(self, shape=None, pixelsize=0.015, rn=1., dark=0., gain=1., fullwell=1e4,
+    def __init__(self, shape=None, pixelsize=15., rn=1., dark=0., gain=1., fullwell=1e4,
                  nonlinear=1., qe=0.9):
         if shape is not None and len(shape) != 2:
             raise ValueError('Shape must contain two integers.')

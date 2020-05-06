@@ -51,7 +51,7 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
             linearly or log-linearly) sampled to numerical accuracy.
     """
     dw = numpy.diff(numpy.log(wave))/numpy.log(base) if log else numpy.diff(wave)
-    if numpy.any( numpy.absolute(numpy.diff(dw)) > 100*numpy.finfo(dw.dtype).eps):
+    if numpy.any(numpy.absolute(numpy.diff(dw)) > 2e-12): #00*numpy.finfo(dw.dtype).eps):
         raise ValueError('Wavelength vector is not uniformly sampled to numerical accuracy.')
     return numpy.mean(dw)
 
@@ -279,13 +279,17 @@ class Spectrum:
         if check:
             found_regular, found_log = Spectrum.assess_sampling(_wave)
             if self.regular != found_regular:
+                embed()
+                exit()
                 raise ValueError('Expected {0} sampling, found {1} sampling.'.format(
                                     'regular' if self.regular else 'irregular',
                                     'regular' if found_regular else 'irregular'))
             if self.log != found_log:
+                embed()
+                exit()
                 raise ValueError('Geometric sampling {0} found, but {1} expected.'.format(
-                                    'was' if self.log else 'was not',
-                                    'was' if found_log else 'was not'))
+                                    'was' if found_log else 'was not',
+                                    'was' if self.log else 'was not'))
 
         self.sres = None if resolution is None else numpy.atleast_1d(resolution)
         if self.sres is not None:
@@ -332,12 +336,12 @@ class Spectrum:
             if the sampling is log-linear.
         """
         # Use absolute to allow for a monotonically decreasing wavelength vector
-        ddw = numpy.diff(numpy.absolute(numpy.diff(wave)))
-        regular = numpy.all(ddw < 100*numpy.finfo(ddw.dtype).eps)
+        ddw = numpy.absolute(numpy.diff(numpy.diff(wave)))
+        regular = numpy.all(ddw < 2e-12) #00*numpy.finfo(ddw.dtype).eps)
         if regular:
             return regular, False
-        ddw = numpy.diff(numpy.absolute(numpy.diff(numpy.log(wave))))
-        regular = numpy.all(ddw < 100*numpy.finfo(ddw.dtype).eps)
+        ddw = numpy.absolute(numpy.diff(numpy.diff(numpy.log(wave))))
+        regular = numpy.all(ddw < 2e-12) #00*numpy.finfo(ddw.dtype).eps)
         if regular:
             return regular, True
         return False, False
@@ -995,7 +999,7 @@ class Spectrum:
                                               bounds_error=False,
                                               fill_value=(self.sres[0],self.sres[-1]))(r.outx)
         return Spectrum(r.outx, r.outy, error=r.oute, mask=r.outf < 0.8, resolution=sres,
-                        use_sampling_assessments=True)
+                        regular=True, log=log)
 
     def match_resolution(self, resolution, wave=None):
         r"""
@@ -1109,7 +1113,7 @@ class EmissionLineSpectrum(Spectrum):
             The FWHM of the Gaussian line profiles.  If the resolution
             vector is provided, these are assumed to be the *intrinsic*
             widths, such that the line included in the spectrum has an
-            observed with determined by that quadrature sum of the
+            observed width determined by the quadrature sum of the
             intrinsic and instrumental widths.  If the resolution vector
             is not provided, the line simply has the provided FWHM.
         units (:obj:`str`, array-like, optional):
@@ -1123,7 +1127,9 @@ class EmissionLineSpectrum(Spectrum):
             which must have the same length as the input wavelength
             vector.  The continuum is 0 if not provided.
         resolution (array-like, optional):
-            1D spectral resolution (:math:`$R=\lambda/\Delta\lambda$`)
+            1D spectral resolution
+            (:math:`$R=\lambda/\Delta\lambda$`). If None, the width
+            of the lines is set by ``fwhm`` only.
         log (:obj:`bool`, optional):
             Spectrum is sampled in steps of log base 10.
     """

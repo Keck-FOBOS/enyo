@@ -13,9 +13,21 @@ class Extraction:
 
     FWHM can be fractional pixels; for now width must be whole pixels.
 
+    Profile describes how the light is distributed across the
+    detector pixels. For now, use ``profile='gaussian'`` for a fiber
+    aperture, and ``profile='uniform'`` for a slit aperture, but that
+    should be improved. For a uniform profile, the FWHM and width
+    should be the same, but the FWHM is never used.
+
+    Spectral profile is not used.
+
+    .. todo::
+
+        Allow the 2D profile to be provided directly.
+
     """
     def __init__(self, detector, spatial_fwhm=3, spatial_width=3,
-                 spectral_fwhm=3, spectral_width=3):
+                 spectral_fwhm=3, spectral_width=3, profile='gaussian'):
         self.detector = detector
 
         # All in pixel units
@@ -24,7 +36,7 @@ class Extraction:
         self.spectral_fwhm = spectral_fwhm
         self.spectral_width = int(spectral_width)
 
-        self._get_profile()
+        self._get_profile(profile)
 
     @staticmethod
     def _pixelated_gaussian(fwhm, width):
@@ -34,14 +46,34 @@ class Extraction:
                         - special.erf(edges[:-1]/numpy.sqrt(2)))/2.
         return edges, profile
 
-    def _get_profile(self):
+    @staticmethod
+    def _pixelated_uniform(width):
+        # Pixel edges in units of the profile dispersion
+        edges = width * numpy.linspace(-1, 1, width+1)/2
+        profile = numpy.full(width, 1/width, dtype=float)
+        return edges, profile
+
+    def _get_profile(self, profile):
         """
         Construct the spatial profile over the extraction aperture.
         """
-        self.spatial_edges, self.spatial_profile \
-                = Extraction._pixelated_gaussian(self.spatial_fwhm, self.spatial_width)
-        self.spectral_edges, self.spectral_profile \
-                = Extraction._pixelated_gaussian(self.spectral_fwhm, self.spectral_width)
+        if profile == 'gaussian':
+            self.spatial_edges, self.spatial_profile \
+                    = Extraction._pixelated_gaussian(self.spatial_fwhm, self.spatial_width)
+            self.spectral_edges, self.spectral_profile \
+                    = Extraction._pixelated_gaussian(self.spectral_fwhm, self.spectral_width)
+            return
+
+        if profile == 'uniform':
+            self.spatial_fwhm = self.spatial_width
+            self.spatial_edges, self.spatial_profile \
+                    = Extraction._pixelated_uniform(self.spatial_width)
+            self.spectral_fwhm = self.spectral_width
+            self.spectral_edges, self.spectral_profile \
+                    = Extraction._pixelated_uniform(self.spectral_width)
+            return
+
+        raise ValueError('{0} profile not recognized.  Must be \'gaussian\' or \'uniform\'')
 
         # 2D profile? ...
 #        self.profile = self.spectral_profile[:,None]*self.spatial_profile[None,:]
@@ -58,7 +90,7 @@ class Extraction:
         This operation *only* sums over the spatial profile. The
         spectral width provided is used to set the number of pixels
         extracted to construct the desired S/N units (per resolution
-        element, angstom, pixel). To get the S/N per pixel, use the
+        element, angstrom, pixel). To get the S/N per pixel, use the
         default. Otherwise, ``spectral_width`` is, e.g., the number
         of pixels per angstrom.
 

@@ -114,15 +114,35 @@ class APFTelescope(Telescope):
 
 
 class TMTTelescope(Telescope):
-    def __init__(self):
+    def __init__(self, reflectivity='req'):
+        """
+        TMT telescope parameters.
+
+        Args:
+            reflectivity (:obj:`str`, optional):
+                The reflectivity curve to use. For the ORD
+                requirement or goal, use ``'req'`` or ``'goal'``,
+                respectively.
+        """
+        if reflectivity not in ['req', 'goal']:
+            raise ValueError('Must set reflectivity to \'req\' or \'goal\'.')
         # Assumes the Nasymth port for the throughput; three
         # reflections off an aluminum coating.
-        eta_file = os.path.join(os.environ['ENYO_DIR'], 'data', 'efficiency', 'aluminum.db')
-        single_reflection = efficiency.Efficiency.from_file(eta_file)
+#        eta_file = os.path.join(os.environ['ENYO_DIR'], 'data', 'efficiency',
+#                                'uv_enhanced_silver.db')
+#        single_reflection = efficiency.Efficiency.from_file(eta_file)
+        eta_file = os.path.join(os.environ['ENYO_DIR'], 'data', 'efficiency', 'tmt_ord.db')
+        db = numpy.genfromtxt(eta_file)
+        c = 3 if reflectivity == 'req' else 4
+        single_reflection = efficiency.Efficiency(db[:,c], wave=db[:,0]) 
         throughput = efficiency.CombinedEfficiency(dict([(key,single_reflection)
                                                          for key in ['m1', 'm2', 'm3']]))
         # TODO: These numbers are all temporary
-        super(TMTTelescope, self).__init__(155.47833, 19.82833, 4160.0, 15., 2.183,
+        # Focal ratio is f/15
+        # Area is just taken as 30m diameter with a 10% obstruction
+        # Plate scale is 1e3 * 15[f/] * 30 [m] / 206265 [arcsec/rad] = 2.182 [mm/arcsec]"""
+        # Location is just taken to be the same as Keck.
+        super(TMTTelescope, self).__init__(155.47833, 19.82833, 4160.0, 15., 2.182,
                                            throughput=throughput, diameter=30, obstruction=0.1)
 
 

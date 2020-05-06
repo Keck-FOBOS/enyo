@@ -58,7 +58,7 @@ from IPython import embed
 
 import numpy
 
-from scipy import interpolate
+from scipy import interpolate, signal
 from scipy.special import erf
 
 import astropy.constants
@@ -180,7 +180,7 @@ class VariableGaussianKernel:
                     numpy.sqrt(numpy.sum(numpy.square(ae*self.kernel), axis=0))
 
 
-def convolution_variable_sigma(y, sigma, ye=None, integral=False, large_sigma=10.):
+def convolution_variable_sigma(y, sigma, ye=None, integral=False, large_sigma=10., speedup=True):
     r"""
     Convolve a discretely sampled function :math:`y(x)` with a Gaussian
     kernel, :math:`g`, where the standard deviation of the kernel is a
@@ -242,6 +242,12 @@ def convolution_variable_sigma(y, sigma, ye=None, integral=False, large_sigma=10
             A convenience parameter that causes a warning to be
             issued if any of the values in ``sigma`` are larger than
             this threshold.
+        speedup (:obj:`bool`, optional):
+            When the sigma is large, try to speed up the convolution
+            by using scipy.signal.fftconvolve to first convolve by a
+            large baseline sigma. Testing shows there are
+            :math:`\lesssim 1\%` differences when ``speedup`` is
+            used.
 
     Returns:
         `numpy.ndarray`_: Arrays with the convolved function
@@ -249,9 +255,52 @@ def convolution_variable_sigma(y, sigma, ye=None, integral=False, large_sigma=10
         input :math:`x` vector and its error. The second array will
         be returned as None if the error vector is not provided.
     """
+
+    # If the sigma is the same for all values, just use signal.fftconvolve
+    if numpy.all(sigma == sigma[0]):
+        warnings.warn('Used convolution_variable_sigma, but sigma is the same for all pixels.  '
+                      'Defaulting to scipy.signal.fftconvolve.')
+        return convolution_constant_sigma(y, sigma[0], ye=ye)
+
     if numpy.any(sigma > large_sigma):
         warnings.warn('Gaussian kernel dispersion larger than {0:.1f} pixels!'.format(large_sigma))
-    return VariableGaussianKernel(sigma, integral=integral).convolve(y, ye=ye)
+
+        min_sigma = 2.
+        cnst_sigma = numpy.amin(numpy.sqrt(numpy.square(sigma)-min_sigma**2))
+        if cnst_sigma > min_sigma and speedup:
+            warnings.warn('First convolving by a constant sigma of {0:.1f} '. format(cnst_sigma)
+                          + 'pixels before performing the variable sigma convolution.')
+            if ye is None:
+                _y = convolution_constant_sigma(y, cnst_sigma)
+                _ye = None
+            else:
+                _y, _ye = convolution_constant_sigma(y, cnst_sigma, ye=ye)
+            _sigma = numpy.sqrt(numpy.square(sigma) - cnst_sigma**2)
+        else:
+            _y = y
+            _ye = ye
+            _sigma = sigma
+
+    return VariableGaussianKernel(_sigma, integral=integral).convolve(_y, ye=_ye)
+
+
+def convolution_constant_sigma(y, sigma, ye=None):
+    """
+    Basic wrapper for scipy.signal.gaussian and scipy.signal.fftconvolve.
+    """
+    if not isinstance(sigma, (int, float, numpy.integer, numpy.floating)):
+        raise TypeError('`sigma` must be a scalar.')
+    width = int(10*sigma)+1
+    if width % 2 == 0:
+        width += 1
+    if width > y.size:
+        width = y.size
+    kernel = signal.gaussian(width, sigma)
+    kernel /= numpy.sum(kernel)
+    _y = signal.fftconvolve(y, kernel, mode='same')
+    if ye is None:
+        return _y
+    return _y, numpy.sqrt(signal.fftconvolve(numpy.square(ye), kernel, mode='same'))
 
 
 class SpectralResolution:
@@ -966,7 +1015,7 @@ def match_spectral_resolution(wave, flux, sres, new_sres_wave, new_sres, ivar=No
                 out_ivar[indx] = oivar[indx]
                 del oflux, oivar
             out_sres[indx] = res[0].adjusted_resolution(indx=indx)
-            out_mask = (res[0].sig_mask == 1) | mask
+            out_mask = (res[0].sig_mask == 1) | _mask
         except ValueError as e:
             warnings.warn('Encountered ValueError: {0} ; continuing but resolution is NOT '
                           'changed and mask is set.'.format(e))
