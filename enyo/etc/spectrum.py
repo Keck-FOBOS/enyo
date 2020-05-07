@@ -60,7 +60,7 @@ def spectral_coordinate_step(wave, log=False, base=10.0):
             linearly or log-linearly) sampled to numerical accuracy.
     """
     dw = numpy.diff(numpy.log(wave))/numpy.log(base) if log else numpy.diff(wave)
-    if numpy.any(numpy.absolute(numpy.diff(dw)) > 2e-12): #00*numpy.finfo(dw.dtype).eps):
+    if numpy.any(numpy.absolute(numpy.diff(dw)) > 1e-11): #00*numpy.finfo(dw.dtype).eps):
         raise ValueError('Wavelength vector is not uniformly sampled to numerical accuracy.')
     return numpy.mean(dw)
 
@@ -345,11 +345,11 @@ class Spectrum:
         """
         # Use absolute to allow for a monotonically decreasing wavelength vector
         ddw = numpy.absolute(numpy.diff(numpy.diff(wave)))
-        regular = numpy.all(ddw < 2e-12) #100*numpy.finfo(ddw.dtype).eps)
+        regular = numpy.all(ddw < 1e-11) #100*numpy.finfo(ddw.dtype).eps)
         if regular:
             return regular, False
         ddw = numpy.absolute(numpy.diff(numpy.diff(numpy.log(wave))))
-        regular = numpy.all(ddw < 2e-12) #100*numpy.finfo(ddw.dtype).eps)
+        regular = numpy.all(ddw < 1e-11) #100*numpy.finfo(ddw.dtype).eps)
         if regular:
             return regular, True
         return False, False

@@ -280,6 +280,10 @@ def convolution_variable_sigma(y, sigma, ye=None, integral=False, large_sigma=10
             _y = y
             _ye = ye
             _sigma = sigma
+    else:
+        _y = y
+        _ye = ye
+        _sigma = sigma
 
     return VariableGaussianKernel(_sigma, integral=integral).convolve(_y, ye=_ye)
 

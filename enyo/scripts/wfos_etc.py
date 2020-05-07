@@ -15,7 +15,7 @@ from matplotlib import pyplot, ticker
 from astropy import units
 
 from enyo.etc import source, efficiency, telescopes, spectrum, extract, aperture, detector
-from enyo.etc.spectrographs import TMTWFOSBlue, TMTWFOSRed
+from enyo.etc.spectrographs import TMTWFOSBlue, TMTWFOSRed, WFOSGrating
 from enyo.etc.observe import Observation
 
 def parse_args(options=None):
@@ -80,7 +80,8 @@ def parse_args(options=None):
                                  'brightness.  See the MAG option.')
 
     parser.add_argument('--blue_grat', default=TMTWFOSBlue.default_grating,
-                        type=str, help='Grating to use in the blue arm')
+                        type=str, help='Grating to use in the blue arm.  Options are: {0}'.format(
+                        ', '.join([g for g in WFOSGrating.available_gratings.keys() if 'B' in g])))
     bgrat_grp = parser.add_mutually_exclusive_group()
     bgrat_grp.add_argument('--blue_wave', default=None, type=float,
                            help='Central wavelength for the blue arm.  If None, will use the '
@@ -94,7 +95,8 @@ def parse_args(options=None):
                              'set --blue_binning 2 1')
 
     parser.add_argument('--red_grat', default=TMTWFOSRed.default_grating,
-                        type=str, help='Grating to use in the red arm')
+                        type=str, help='Grating to use in the red arm.  Options are: {0}'.format(
+                        ', '.join([g for g in WFOSGrating.available_gratings.keys() if 'R' in g])))
     rgrat_grp = parser.add_mutually_exclusive_group()
     rgrat_grp.add_argument('--red_wave', default=None, type=float,
                            help='Central wavelength for the red arm.  If None, will use the '
