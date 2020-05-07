@@ -1,7 +1,16 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
 """
 Spectrum utilities
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 import os
 import warnings
@@ -221,23 +230,22 @@ class Spectrum:
     erg/s/cm^2/angstrom.
 
     If wavelengths are provided in air (instantiated with
-    ``vacuum=False``), wavelengths are converted to vacuum and the
+    ``airwave=True``), wavelengths are converted to vacuum and the
     sampling is set to be irregular.
 
     .. todo::
-        - incorporate astropy units?
-        - keep track of units
+        - allow for different units?
 
     Args:
         wave (array-like):
-            1D wavelength data in angstroms.  Expected to be sampled
-            linearly or geometrically.
+            1D wavelength data in angstroms. Can be sampled
+            irregularly.
         flux (array-like):
             1D flux data in 1e-17 erg/s/cm^2/angstrom. Use
             :func:`convert_flux_units`, if necessary.
-        error (array-like):
+        error (array-like, optional):
             1-sigma error in the flux data
-        mask (array-like):
+        mask (array-like, optional):
             Boolean mask for flux data (True=bad)
         resolution (:obj:`float`, array-like, optional):
             1D spectral resolution (:math:`$R=\lambda/\Delta\lambda$`)
@@ -337,11 +345,11 @@ class Spectrum:
         """
         # Use absolute to allow for a monotonically decreasing wavelength vector
         ddw = numpy.absolute(numpy.diff(numpy.diff(wave)))
-        regular = numpy.all(ddw < 2e-12) #00*numpy.finfo(ddw.dtype).eps)
+        regular = numpy.all(ddw < 2e-12) #100*numpy.finfo(ddw.dtype).eps)
         if regular:
             return regular, False
         ddw = numpy.absolute(numpy.diff(numpy.diff(numpy.log(wave))))
-        regular = numpy.all(ddw < 2e-12) #00*numpy.finfo(ddw.dtype).eps)
+        regular = numpy.all(ddw < 2e-12) #100*numpy.finfo(ddw.dtype).eps)
         if regular:
             return regular, True
         return False, False
@@ -904,7 +912,7 @@ class Spectrum:
                 The target value of the flux at the provided
                 wavelength.
         """
-        return self.rescale(flux/self.interp(wave))
+        self.rescale(flux/self.interp(wave))
 
     def rescale_magnitude(self, new_mag, wavelength=None, band=None, system='AB'):
         """
@@ -932,19 +940,25 @@ class Spectrum:
         """
         if wavelength is None and band is None:
             raise ValueError('Must provide either wavelength or the bandpass filter.')
+        if system not in ['AB', 'Vega']:
+            raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
         dmag = new_mag - self.magnitude(wavelength=wavelength, band=band, system=system)
-        if system in ['AB', 'Vega']:
-            return self.rescale(numpy.power(10., -dmag/2.5))
-        raise NotImplementedError('Photometric system {0} not implemented.'.format(system))
+        self.rescale(numpy.power(10., -dmag/2.5))
 
     def photon_flux(self, inplace=True):
         r"""
         Convert the spectrum from 1e-17 erg/s/cm^2/angstrom to
         photons/s/cm^2/angstrom.
 
-        If `inplace is True`, the spectrum is modified in place and
-        None is returned; otherwise the converted flux vector is
-        returned.
+        Args:
+            inplace (:obj:`bool`, optional):
+                If ``inplace is True``, the spectrum is modified in
+                place and None is returned; otherwise, the converted
+                flux vector is returned.
+
+        Returns:
+            `numpy.ndarray`_: Flux vector in photons/s/cm^2/angstrom
+            if ``inplace is False``; otherwise, nothing is returned.
         """
         ergs_per_photon = astropy.constants.h.to('erg s') * astropy.constants.c.to('angstrom/s') \
                             / (self.wave * astropy.units.angstrom)
@@ -952,6 +966,24 @@ class Spectrum:
                     else self.interpolator.y * 1e-17 / ergs_per_photon.value
 
     def plot(self, ax=None, show=False, **kwargs):
+        """
+        Construct a plot of the spectrum.
+
+        Args:
+            ax (`matplotlib.axes.Axes`_):
+                Axes for the plot. If None, a new instance is
+                generated using ``pyplot.subplot``.
+            show (:obj:`bool`, optional):
+                Show the plot instead of just returning the modified
+                `matplotlib.axes.Axes`_ instance.
+            **kwargs:
+                Other keywords (like ``color``) passed directly to
+                ``pyplot.plot``.
+
+        Returns:
+            `matplotlib.axes.Axes`_: Modified or new instance;
+            returned only if ``show is False``.
+        """
         _ax = pyplot.subplot() if ax is None else ax
         _ax.plot(self.wave, self.flux, **kwargs)
         if show:
@@ -1062,7 +1094,9 @@ class Spectrum:
 
         Spectrum is in 1e-17 erg/s/cm^2/angstrom, so this shifts the
         wavelength vector by 1+z and rescales the flux by 1+z to keep
-        the flux per *observed* wavelength.  S/N is kept fixed.
+        the flux per *observed* wavelength constant; this is not the
+        same as surface-brightness dimming, **which is not accounted
+        for**. S/N is kept fixed.
 
         Args:
             z (:obj:`float`):
@@ -1096,7 +1130,6 @@ class EmissionLineSpectrum(Spectrum):
 
     .. todo::
         - use MaNGA DAP functions
-        - apply surface-brightness dimming if redshift provided?
     
     Flux units are 1e-17 erg/s/cm^2/angstrom.
 
@@ -1220,6 +1253,9 @@ class EmissionLineSpectrum(Spectrum):
 
 # 8329-6104
 class BlueGalaxySpectrum(Spectrum):
+    """
+    An example blue galaxy spectrum pulled from the MaNGA survey.
+    """
     def __init__(self, redshift=0.0):
         fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/galaxy/blue_galaxy_8329-6104.fits')
         hdu = fits.open(fitsfile)
@@ -1234,6 +1270,9 @@ class BlueGalaxySpectrum(Spectrum):
 
 # 8131-6102
 class RedGalaxySpectrum(Spectrum):
+    """
+    An example red galaxy spectrum pulled from the MaNGA survey.
+    """
     def __init__(self, redshift=0.0):
         fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/galaxy/red_galaxy_8131-6102.fits')
         hdu = fits.open(fitsfile)
@@ -1260,6 +1299,10 @@ class RedGalaxySpectrum(Spectrum):
 
 
 class MaunakeaSkySpectrum(Spectrum):
+    """
+    The default, empirical dark night-sky spectrum at Maunakea
+    provided by Chuck Steidel.
+    """
     def __init__(self):
         fitsfile = os.path.join(os.environ['ENYO_DIR'], 'data/sky/lris_esi_skyspec_fnu.fits')
         init = Spectrum.from_fits(fitsfile, waveext='WCS', fluxext=0, airwave=True,
@@ -1274,7 +1317,6 @@ class MaunakeaSkySpectrum(Spectrum):
         flux[indx] = numpy.median(flux[(wave > 3210) & (wave < 4000)])
         super(MaunakeaSkySpectrum, self).__init__(wave, flux)
 
-
     @classmethod
     def from_file(cls):
         raise NotImplementedError('Maunakea sky spectrum is fixed.')
@@ -1286,8 +1328,19 @@ class ABReferenceSpectrum(Spectrum):
 
     Inherits from :class:`Spectrum`, which we take to mean that the flux
     is always in units of 1e-17 erg/s/cm^2/angstrom.
+
+    Args:
+        wave (`numpy.ndarray`_):
+            Wavelength vector for the spectrum.
+        resolution (:obj:`float`, array-like, optional):
+            1D spectral resolution (:math:`$R=\lambda/\Delta\lambda$`)
+        regular (:obj:`bool`, optional):
+            Spectrum is regularly sampled, either linearly or log-linearly
+        log (:obj:`bool`, optional):
+            Spectrum is sampled in steps of log base 10. If regular
+            is False, this is ignored.
     """
-    def __init__(self, wave, resolution=None, log=False, regular=True):
+    def __init__(self, wave, resolution=None, regular=True, log=False):
         norm = numpy.power(10., 29 - 48.6/2.5)  # Reference flux in microJanskys
         fnu = numpy.full_like(wave, norm, dtype=float)
         flambda = convert_flux_density(wave, fnu, density='Hz')

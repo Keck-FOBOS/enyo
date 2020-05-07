@@ -1,7 +1,17 @@
 #!/bin/env/python3
 # -*- encoding utf-8 -*-
 """
-Detector class
+Module with defined spectrographs.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
 """
 
 import os
@@ -10,7 +20,7 @@ from IPython import embed
 
 import numpy
 
-from . import telescopes, observe, kernel, detector, efficiency, optical, vph
+from . import telescopes, observe, kernel, detector, efficiency, vph
 
 # from . import telescopes, observe, kernel, detector, efficiency, optical
 
@@ -251,8 +261,6 @@ class SlitSpectrographArm:
     Args:
         grating (:class:`~enyo.etc.vph.VPHGrating`):
             The grating object.
-        detector (:class:`~enyo.etc.detector.Detector`):
-            Object that provides detector properties.
         cen_wave (:obj:`float`, optional):
             Central wavelength in angstroms for an on-axis slit. Note
             this is mutually exclusive with ``grating_angle``. If
@@ -270,16 +278,22 @@ class SlitSpectrographArm:
     Raises:
         NotImplementedError:
             Raised if the derived class (see, e.g.,
-            :class:`TMTWFOSBlueEfficiency`) does not have
-            :attr:`base_file` defined.
+            :class:`TMTWFOSBlue`) does not have :attr:`base_file`
+            defined.
 
     """
 
     telescope = None
-    """Telescope instance with telescope properties."""
+    """
+    :class:`~enyo.etc.telescopes.Telescope` instance with telescope
+    properties.
+    """
 
     det = None
-    """Detector instance with the detector properties."""
+    """
+    :class:`~enyo.etc.detector.Detector` instance with the detector
+    properties.
+    """
 
     focal_length_coll = None
     """Collimator focal length in mm"""
@@ -312,6 +326,7 @@ class SlitSpectrographArm:
         if cen_wave is not None and grating_angle is not None:
             raise ValueError('Cannot provide both cen_wave or grating_angle.')
 
+        # Setup the grating
         self.grating = grating
         if cen_wave is None:
             self.grating_angle = grating_angle
@@ -320,24 +335,29 @@ class SlitSpectrographArm:
             self.cen_wave = cen_wave
             self.grating_angle = self.grating.bragg_angle(self.cen_wave)
 
+        # Get the "base-level" efficiency; i.e., everything except the
+        # telescope and the grating.
         self.base_efficiency = self._base_efficiency()
 
+        # Check the focal-plane limits
         if self.focal_plane_limits is not None and len(self.focal_plane_limits) != 4:
             raise ValueError('{0} poorly defined; '.format(self.__class__.__name__)
                              + 'focal_plane_limits must be None or a 4-element tuple.')
 
-        # Plate scale of the spectrograph arm at the detector in mm/arcsec
+        # Set the plate scale of the spectrograph arm at the detector
+        # in mm/arcsec
         self.platescale = self.telescope.platescale * self.focal_length_cam/self.focal_length_coll
 
     @property
     def pixelscale(self):
-        return self.det.pixelsize/self.platescale/1e3     # arcsec/pixel
+        """Pixelscale of the detector in arcsec/pixel."""
+        return self.det.pixelsize/self.platescale/1e3
 
     def _base_efficiency(self):
         """
         Internal method to construct the baseline efficiency (i.e.,
-        all the efficiencies of all the spectrograph components for
-        this arm, except for this grating).
+        the combined efficiency of all spectrograph components for
+        this arm, except for the grating and the telescope).
         """
         if self.base_file is None:
             raise NotImplementedError('Must define the base_file for {0}'.format(
@@ -350,28 +370,29 @@ class SlitSpectrographArm:
         # total efficiency of everything but the grating.
         return efficiency.Efficiency(numpy.prod(db[:,1:], axis=1), wave=db[:,0]*10)
 
-    def monochromatic_image(self, sky, spec_aperture, onsky_source=None):
-        """
-        Construct a monochromatic image of a source through an
-        aperture as observed by this spectrograph arm.
-
-        Args:
-            sky (:class:`enyo.etc.source.OnSkySource`):
-                Sky flux distribution.
-            spec_aperture (:class:`enyo.etc.aperture.Aperture`):
-                Spectrograph aperture. Aperture is expected to be
-                oriented with the dispersion along the first axis
-                (e.g., the slit width is along the abcissa).
-            onsky_source (:class:`enyo.etc.source.OnSkySource`, optional):
-                On-sky distribution of the source flux. If None, only
-                sky is observed through the aperture.
-
-        Returns:
-            `numpy.ndarray`_: 2D array with a representation of the
-            monochromatic image as sampled by the detector pixels.
-        """
-        return observe.monochromatic_image(sky, spec_aperture, self.cam_kernel, self.platescale,
-                                           self.det.pixelsize, onsky_source=onsky_source)
+# NOT TESTED
+#    def monochromatic_image(self, sky, spec_aperture, onsky_source=None):
+#        """
+#        Construct a monochromatic image of a source through an
+#        aperture as observed by this spectrograph arm.
+#
+#        Args:
+#            sky (:class:`enyo.etc.source.OnSkySource`):
+#                Sky flux distribution.
+#            spec_aperture (:class:`enyo.etc.aperture.Aperture`):
+#                Spectrograph aperture. Aperture is expected to be
+#                oriented with the dispersion along the first axis
+#                (e.g., the slit width is along the abcissa).
+#            onsky_source (:class:`enyo.etc.source.OnSkySource`, optional):
+#                On-sky distribution of the source flux. If None, only
+#                sky is observed through the aperture.
+#
+#        Returns:
+#            `numpy.ndarray`_: 2D array with a representation of the
+#            monochromatic image as sampled by the detector pixels.
+#        """
+#        return observe.monochromatic_image(sky, spec_aperture, self.cam_kernel, self.platescale,
+#                                           self.det.pixelsize, onsky_source=onsky_source)
 
     def wavelength_limits(self, x, y, add_grating_limits=False):
         """
@@ -380,18 +401,20 @@ class SlitSpectrographArm:
 
         Args:
             x (:obj:`float`):
-                Field position perpendicular to the dispersion
-                direction in arcseconds relative to the field center.
+                Field position along the dispersion direction in
+                arcseconds relative to the field center.
             y (:obj:`float`):
-                Field position parallel to the dispersion direction
-                in arcseconds relative to the field center.
+                Field position along the cross-dispersed direction in
+                arcseconds relative to the field center.
             add_grating_limits (:obj:`bool`, optional):
                 The returned limits include any limits set by the
                 grating.
 
         Returns:
             :obj:`tuple`: **Approximate** minimum and maximum
-            wavelengths viewable by the camera.
+            wavelengths viewable by the camera. There are known
+            differences between these results and those returned by a
+            Zemax model of the instrument.
         """
         # Pupil Space Field Angles
         theta_x = self.slit_angle(x)
@@ -435,13 +458,11 @@ class SlitSpectrographArm:
                 One or more wavelengths (angstroms in air) at which
                 to sample the spectrograph efficiency.
             x (:obj:`float`, optional):
-                Field position perpendicular to the dispersion
-                direction in arcseconds relative to the field center.
-                Must be within :math:`\pm 90` arcsec.
+                Field position along the dispersion direction in
+                arcseconds relative to the field center.
             y (:obj:`float`, optional):
-                Field position parallel to the dispersion direction
-                in arcseconds relative to the field center. Must be
-                within :math:`\pm 250` arcsec.
+                Field position along the cross-dispersed direction in
+                arcseconds relative to the field center.
             same_type (:obj:`bool`, optional):
                 Return the efficiency values relevant with the same
                 type as the provided ``wave``. If False, ``wave``
@@ -453,6 +474,14 @@ class SlitSpectrographArm:
             efficiency of the spectrograph arm at one or more
             wavelengths. The returned type matches the input type of
             ``wave``.
+
+        Raises:
+            TypeError:
+                Raised if ``same_type`` is False and ``wave`` is not
+                an array.
+            ValueError:
+                Raised if ``x`` or ``y`` are outside the field limits
+                of the instrument.
         """
         if not same_type and not isinstance(wave, (list, numpy.ndarray)):
             raise TypeError('To return an Efficiency object, must provide a wavelength array.')
@@ -482,11 +511,38 @@ class SlitSpectrographArm:
         return eta if same_type else efficiency.Efficiency(eta, wave=wave)
 
     def slit_angle(self, x):
+        """
+        Entrance angle relative to the field center for a slit at
+        position ``x``.
+
+        Args:
+            x (:obj:`float`):
+                Field position along the dispersion direction in
+                arcseconds relative to the field center.
+
+        Returns:
+            :obj:`float`: Slit entrance angle (should be added to the
+            grating angle to get the grating incident angle).
+        """
         return numpy.degrees(numpy.arctan(x*self.telescope.platescale/self.focal_length_coll))
 
-    def linear_dispersion(self, wave, x=0, m=1):
+    def linear_dispersion(self, wave, x=0., m=1):
         """
         Return the linear dispersion in mm per angstrom.
+
+        Args:
+            wave (:obj:`float`, array-like):
+                Wavelengths at which to calculate the linear
+                dispersion.
+            x (:obj:`float`, optional):
+                Field position along the dispersion direction in
+                arcseconds relative to the field center.
+            m (:obj:`int`, optional):
+                Grating order.
+
+        Returns:
+            :obj:`float`, `numpy.ndarray`_: Linear dispersion at each
+            wavelength position in mm/angstrom.
         """
         alpha = self.slit_angle(x) + self.grating_angle
         return self.focal_length_cam*self.grating.angular_dispersion(wave, alpha=alpha, m=m)
@@ -501,8 +557,25 @@ class SlitSpectrographArm:
             Assumes perfect image quality and a uniformly illuminated
             aperture.
 
+        Args:
+            wave (:obj:`float`, array-like):
+                Wavelengths at which to calculate the spectral
+                resolution.
+            x (:obj:`float`, optional):
+                Field position along the dispersion direction in
+                arcseconds relative to the field center.
+            slit_width (:obj:`float`, optional):
+                The width of the slit in arcsec along the dispersion
+                direction (i.e., should account for any rotation of
+                the slit).
+            m (:obj:`int`, optional):
+                Grating order.
+
+        Returns:
+            :obj:`float`, `numpy.ndarray`_: The spectral resolution,
+            :math:`R \equiv \lambda/\delta\lambda`, at each
+            wavelength position.
         """
-        # Width of the resolution element in angstroms
         return wave / self.resolution_element(slit_width=slit_width, units='angstrom', wave=wave,
                                               x=x, m=m)
 
@@ -519,6 +592,33 @@ class SlitSpectrographArm:
             Assumes perfect image quality and a uniformly illuminated
             aperture.
 
+        Args:
+            slit_width (:obj:`float`, optional):
+                The width of the slit in arcsec along the dispersion
+                direction (i.e., should account for any rotation of
+                the slit).
+            units (:obj:`str`, optional):
+                Units for the resolution element. Must be
+                ``'micron'``, ``'pixels'``, or ``'angstrom'``. Note
+                that ``wave`` is ignored (and the returned value is a
+                single float) unless angstrom units are requested,
+                when ``wave`` is required.
+            wave (:obj:`float`, array-like, optional):
+                Wavelengths at which to calculate the spectral
+                resolution. Ignored unless units are angstroms.
+            x (:obj:`float`, optional):
+                Field position along the dispersion direction in
+                arcseconds relative to the field center. Ignored
+                unless units are angstroms.
+            m (:obj:`int`, optional):
+                Grating order. Ignored unless units are angstroms.
+
+        Returns:
+            :obj:`float`, `numpy.ndarray`_: The width of the spectral
+            resolution element in the requested units. If ``units ==
+            'angstroms``, the returned type matches ``wave``;
+            otherwise, a single float is returned.
+        
         """
         if units == 'angstrom' and wave is None:
             raise ValueError('For resolution element in angstrom units, must at least provide '
@@ -538,6 +638,20 @@ class SlitSpectrographArm:
         raise ValueError('Unknown units: {0}'.format(units))
 
 class WFOSGrating(vph.VPHGrating):
+    """
+    :class:`~enyo.etc.vph.VPHGrating` instances available in the
+    current WFOS design.
+
+    To list the available gratings::
+
+        from enyo.etc.spectrographs import WFOSGrating
+        print(WFOSGrating.available_gratings.keys())
+
+    Args:
+        grating (:obj:`str`):
+            Grating name. Must be one of the gratings with parameters
+            defined by :attr:`available_gratings`.
+    """
     available_gratings \
             = dict(B1210=dict(line_density=1210., n_bulk=1.35, n_mod=0.05, thickness=4.0,
                               wave_lim=(3100., 5600.)),
@@ -572,6 +686,30 @@ class WFOSGrating(vph.VPHGrating):
 
 
 class TMTWFOSArm(SlitSpectrographArm):
+    """
+    Instance of :class:`SlitSpectrographArm` specific to TMT-WFOS.
+
+    Args:
+        grating (:obj:`str`, optional):
+            Grating name. Must be one of the gratings with parameters
+            defined by :attr:`available_gratings`. If None, use
+            :attr:`default_grating` defined by each arm.
+        cen_wave (:obj:`float`, optional):
+            Central wavelength in angstroms for an on-axis slit. Note
+            this is mutually exclusive with ``grating_angle``. If
+            this is provided, the grating angle is set to the Bragg
+            angle. If None and ``grating_angle`` is also None, the
+            value is set to the wavelength with the peak efficiency
+            for the selected grating. If None and ``grating_angle``
+            is provided, the central wavelength is set to the Littrow
+            value for the provided grating angle.
+        grating_angle (:obj:`float`, optional):
+            The angle of the grating normal with respect to the
+            incoming beam in degrees. Note this is mutually exclusive
+            with ``cen_wave``. If provided, the central wavelength is
+            set to the Littrow value. If None, the grating angle is
+            set to the Bragg angle for the central wavelength.
+    """
     telescope = telescopes.TMTTelescope()
     focal_length_coll = 4500.
     focal_plane_limits = [-90, 90, -249, 249]

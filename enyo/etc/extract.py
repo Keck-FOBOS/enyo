@@ -1,3 +1,17 @@
+"""
+Simple extraction object
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+"""
+
 from IPython import embed
 
 import numpy
@@ -7,24 +21,43 @@ from scipy import special
 
 class Extraction:
     """
-    fwhm is the number of detector pixels per fwhm
-    
-    width is the number of pixels for the extraction.
+    Perform some nominal extraction calculations.
 
-    FWHM can be fractional pixels; for now width must be whole pixels.
+    The primary purpose of this object is to account for how flux is
+    distributed at the detector for a given spectral element. In both
+    the spatial and spectral dimensions, the ``fwhm`` argument is the
+    the FWHM of the intensity distribution and ``width`` is the
+    extraction aperture, both in pixels.
 
-    Profile describes how the light is distributed across the
-    detector pixels. For now, use ``profile='gaussian'`` for a fiber
-    aperture, and ``profile='uniform'`` for a slit aperture, but that
-    should be improved. For a uniform profile, the FWHM and width
-    should be the same, but the FWHM is never used.
-
-    Spectral profile is not used.
+    The profile describes how the light is distributed across the
+    detector pixels. For now (i.e., until this is improved), use
+    ``profile='gaussian'`` for a fiber aperture, and
+    ``profile='uniform'`` for a slit aperture. For a uniform profile,
+    the FWHM and width should be the same, but the FWHM is never
+    used. The spectral profile is constructed, but never used, the
+    idea being the loss of one monochromatic element is replaced by
+    the adjacent one.
 
     .. todo::
 
         Allow the 2D profile to be provided directly.
 
+    Args:
+        detector (:class:`~enyo.etc.detector.Detector`):
+            Object with the detector data.
+        spatial_fwhm (:obj:`float`, optional):
+            The FWHM in pixels of the spatial PSF at the spectrograph
+            detector.
+        spatial_width (:obj:`int`, optional):
+            The number of pixels in the extraction.
+        spectral_fwhm (:obj:`float`, optional):
+            The FWHM in pixels of the spectral LSF at the
+            spectrograph detector. **NOT USED**.
+        spectral_width (:obj:`int`, optional):
+            The number of pixels in the extraction. **NOT USED**.
+        profile (:obj:`str`, optional):
+            The profile shape. Must be ``'gaussian'`` or
+            ``'uniform'``.
     """
     def __init__(self, detector, spatial_fwhm=3, spatial_width=3,
                  spectral_fwhm=3, spectral_width=3, profile='gaussian'):
@@ -40,6 +73,26 @@ class Extraction:
 
     @staticmethod
     def _pixelated_gaussian(fwhm, width):
+        """
+        Construct the profile of the monochromatic element as a
+        pixelated Gaussian.
+
+        Args:
+            fwhm (:obj:`float`):
+                The Gaussican FWHM in pixels.
+            width (:obj:`int`, optional):
+                The number of pixels to include in the profile. The
+                center of the Gaussian is always at ``width/2``
+                pixels.
+
+        Returns:
+            :obj:`tuple`: Two float vectors are returned: (1) a
+            vector with shape ``(width+1,)`` with the coordinates of
+            the pixel edges in units of the Gaussian dispersion and
+            (2) a vector with shape ``(width,)`` with the profile.
+            The sum of the profile is the integral of the Gaussian
+            over the window ``[-width/2,width/2]``.
+        """
         # Pixel edges in units of the profile dispersion
         edges = width/fwhm * numpy.sqrt(8*numpy.log(2)) * numpy.linspace(-1, 1, width+1)/2
         profile = (special.erf(edges[1:]/numpy.sqrt(2))
@@ -48,6 +101,21 @@ class Extraction:
 
     @staticmethod
     def _pixelated_uniform(width):
+        """
+        Construct the profile of the monochromatic element as a
+        uniform top-hat function.
+
+        Args:
+            width (:obj:`int`):
+                The number of pixels to include in the profile.
+
+        Returns:
+            :obj:`tuple`: Two float vectors are returned: (1) a
+            vector with shape ``(width+1,)`` with the coordinates of
+            the pixel edges in pixels and (2) a vector with shape
+            ``(width,)`` with the profile. The sum of the profile is
+            set to unity (i.e., the extraction is perfect).
+        """
         # Pixel edges in units of the profile dispersion
         edges = width * numpy.linspace(-1, 1, width+1)/2
         profile = numpy.full(width, 1/width, dtype=float)
@@ -56,6 +124,15 @@ class Extraction:
     def _get_profile(self, profile):
         """
         Construct the spatial profile over the extraction aperture.
+
+        Args:
+            profile (:obj:`str`):
+                The profile shape. Must be ``'gaussian'`` or
+                ``'uniform'``.
+
+        Raises:
+            ValueError:
+                Raised if the profile string is not recognized.
         """
         if profile == 'gaussian':
             self.spatial_edges, self.spatial_profile \
@@ -90,17 +167,35 @@ class Extraction:
         This operation *only* sums over the spatial profile. The
         spectral width provided is used to set the number of pixels
         extracted to construct the desired S/N units (per resolution
-        element, angstrom, pixel). To get the S/N per pixel, use the
-        default. Otherwise, ``spectral_width`` is, e.g., the number
-        of pixels per angstrom.
+        element, angstrom, or pixel). To get the S/N per pixel, use
+        the default. Otherwise, ``spectral_width`` is, e.g., the
+        number of pixels per angstrom.
 
-        object_flux and sky_flux can be spectra or individual values,
-        but they must match. I.e., if object_flux is a vector,
-        sky_flux should be also.
+        Args:
+            object_flux (:obj:`float`, `numpy.ndarray`_):
+                Object flux in electrons per second per resolution
+                element, per angstrom or per pixel. Type/Shape must
+                match ``sky_flux``.
+            sky_flux (:obj:`float`, `numpy.ndarray`_):
+                Sky flux in electrons per second per resolution
+                element, per angstrom or per pixel. Type/Shape must
+                match ``sky_flux``.
+            exposure_time (:obj:`float`):
+                Exposure time in seconds.
+            spectral_width (:obj:`float`, optional):
+                The number of pixels in the element relevant to the
+                flux units. This sets how many read-noise hits to
+                include in the total noise calculation.
 
-        Returned fluxes and errors are in electrons per resolution
-        element, per angstrom, or per pixel, depending on the input.
-
+        Returns:
+            :obj:`tuple`: Returns five objects: (1) the extracted
+            object flux, (2) the photon shot variance from the object
+            (includes any dark current), (3) the extracted sky flux,
+            (4) the photon shot variance from the sky (includes any
+            dark current), and (5) the read-noise variance. The
+            returned fluxes are in units of electrons per resolution
+            element, per angstrom, or per pixel, depending on the
+            input.
         """
         # Get the variance in each pixel
         extract_box_n = len(self.spatial_profile) * spectral_width
@@ -149,6 +244,7 @@ class Extraction:
     
     @property
     def spatial_efficiency(self):
+        """Return the extraction efficiency."""
         return numpy.sum(self.spatial_profile)
 
 

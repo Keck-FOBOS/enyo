@@ -1,3 +1,16 @@
+"""
+Collection of utility methods.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+"""
 
 import numpy
 
@@ -10,7 +23,7 @@ def boxcar_average(arr, boxcar):
             Array to average.  Currently cannot be masked.
         boxcar (:obj:`int`, :obj:`tuple`):
             Integer number of pixels to average.  If a single integer,
-            both axes are averaged with the same size box.  If a
+            all axes are averaged with the same size box.  If a
             :obj:`tuple`, the integer is defined separately for each
             array axis; length of tuple must match the number of array
             dimensions.
@@ -42,6 +55,22 @@ def boxcar_average(arr, boxcar):
     return _arr
 
 def boxcar_replicate(arr, boxcar):
+    """
+    Boxcar replicate an array.
+
+    Args:
+        arr (`numpy.ndarray`_):
+            Array to replicate.
+        boxcar (:obj:`int`, :obj:`tuple`):
+            Integer number of times to replicate each pixel. If a
+            single integer, all axes are replicated the same number
+            of times. If a :obj:`tuple`, the integer is defined
+            separately for each array axis; length of tuple must
+            match the number of array dimensions.
+
+    Returns:
+        `numpy.ndarray`_: The block-replicated array.
+    """
     # Check and configure the input
     _boxcar = (boxcar,)*arr.ndim if isinstance(boxcar, int) else boxcar
     if not isinstance(_boxcar, tuple):

@@ -1,3 +1,16 @@
+"""
+Module with the optical model interpolation class.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+"""
 import numpy
 from scipy import interpolate
 
@@ -42,10 +55,10 @@ class OpticalModelInterpolator:
             masked.
 
     Attributes:
-        field (`numpy.array`_):
+        field (`numpy.ndarray`_):
             Field information of the input grid: the x and y
             positions and wavelengths.
-        camera (`numpy.array`_):
+        camera (`numpy.ndarray`_):
             Camera information of the input grid: the x and y
             positions and vignetting.
 

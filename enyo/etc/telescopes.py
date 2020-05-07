@@ -2,6 +2,17 @@
 # -*- encoding utf-8 -*-
 """
 Define telesope parameters
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 import os
 import numpy
@@ -18,33 +29,36 @@ class Telescope:
 
     Args:
         longitude (scalar-like):
-            Earth coordinate with the location of the telescope in degrees.
+            Earth coordinate with the location of the telescope in
+            degrees.
         latitude (scalar-like):
-            Earth coordinate with the location of the telescope in degrees.
+            Earth coordinate with the location of the telescope in
+            degrees.
         elevation (scalar-like):
-            Earth elevation above sea level of the telescope in meters.
+            Earth elevation above sea level of the telescope in
+            meters.
         fratio (scalar-like):
             F-ratio or beam speed (focal length over diameter) for
             the telescope focal plane.
         platescale (scalar-like):
             Telescope platescale in mm/arcsec.
-        throughput (:obj:`float`, :class:`enyo.etc.efficiency.Efficiency`,
-             :class:`enyo.etc.efficiency.CombinedEfficiency`, optional):
+        throughput (:obj:`float`, :class:`~enyo.etc.efficiency.Efficiency`, :class:`~enyo.etc.efficiency.CombinedEfficiency`, optional):
             The throughput of the telescope from the top of the
             telescope to the focal plane.
         area (scalar-like, optional):
             The true or effective area of the telescope aperture in
-            square centimeters.  If not provided, calculated using
-            `diameter`.  Must be provided if `diameter` is not.
+            square centimeters. If not provided, calculated using
+            ``diameter``. Must be provided if ``diameter`` is not.
         diameter (scalar-like, optional):
-            Telescope diameter in meters.  If provided, used to set the
-            telescope area.  Must be provided if `area` is not.
+            Telescope diameter in meters. If provided, used to set
+            the telescope area. Must be provided if `area` is not.
         obstruction (scalar-like, optional):
-            The unitless fraction of the total telescope area lost due
-            to the central obstruction.  If provided, the telescope area
-            is multiplied by (1-`obstruction`) to obtain its effective
-            area.  If not provided, the `area` or `diameter` is assumed
-            to account for the central obstruction.
+            The unitless fraction of the total telescope area lost
+            due to the central obstruction. If provided, the
+            telescope area is multiplied by (1-`obstruction`) to
+            obtain its effective area. If not provided, the `area` or
+            `diameter` is assumed to account for the central
+            obstruction.
 
     Raises:
         ValueError:
@@ -87,6 +101,9 @@ class Telescope:
 
 
 class KeckTelescope(Telescope):
+    """
+    Keck telescopes on MaunaKea
+    """
     def __init__(self):
         # This assumes the f/15 secondary
         fratio = 15
@@ -102,18 +119,27 @@ class KeckTelescope(Telescope):
 
 
 class SDSSTelescope(Telescope):
+    """
+    SDSS 2.5-meter telescope at Apache Point Observatory.
+    """
     def __init__(self):
         super(SDSSTelescope, self).__init__(105.82028, 32.78028, 2788.0, 5., 0.06048, diameter=2.5,
                                             obstruction=0.286)
 
 
 class APFTelescope(Telescope):
+    """
+    Automated Planet Finder telescope at Lick Observatory.
+    """
     def __init__(self):
         super(APFTelescope, self).__init__(121.64278, 37.34139, 1283.0, 15., 0.17452,
                                            diameter=2.41, obstruction=0.02)
 
 
 class TMTTelescope(Telescope):
+    """
+    Thirty-Meter Telescope, assuming it is constructed on Maunakea.
+    """
     def __init__(self, reflectivity='req'):
         """
         TMT telescope parameters.
@@ -146,22 +172,23 @@ class TMTTelescope(Telescope):
                                            throughput=throughput, diameter=30, obstruction=0.1)
 
 
-class Observation:
-    """Not yet implemented..."""
-    def __init__(self, airmass, sky_brightness, exposure_time, wavelength=None, band=None):
-        if wavelength is None and band is None:
-            raise ValueError('Must provide band or wavelength.')
+#class Observation:
+#    """Not yet implemented..."""
+#    def __init__(self, airmass, sky_brightness, exposure_time, wavelength=None, band=None):
+#        if wavelength is None and band is None:
+#            raise ValueError('Must provide band or wavelength.')
+#
+#        self.airmass = airmass
+#        self.sky_brightness = sky_brightness
+#        self.exposure_time = exposure_time
+#        self.wavelength = wavelength
+#        self.band = band
+#
+#    @classmethod
+#    def from_date_telescope_target(cls, date, telescope, target, exposure_time, wavelength=None,
+#                                   band=None):
+#        raise NotImplementedError('Not yet implemented!')
 
-        self.airmass = airmass
-        self.sky_brightness = sky_brightness
-        self.exposure_time = exposure_time
-        self.wavelength = wavelength
-        self.band = band
-
-    @classmethod
-    def from_date_telescope_target(cls, date, telescope, target, exposure_time, wavelength=None,
-                                   band=None):
-        raise NotImplementedError('Not yet implemented!')
         
 #        # Use date to get lunar phase
 #        lunar_cycle = 29.53 # days

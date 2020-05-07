@@ -1,7 +1,16 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
 """
 Define a series of convolution kernels.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 import warnings
 import numpy
@@ -54,7 +63,7 @@ class SpectrographGaussianKernel(Gaussian2DKernel):
 
     def resample(self, pixelscale):
         """
-        Resample the kernel.
+        Resample the kernel to a new pixel scale.
         """
         self.pixelscale = pixelscale
 

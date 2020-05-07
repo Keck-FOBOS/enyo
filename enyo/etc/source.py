@@ -1,7 +1,16 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
 """
-Define an on-sky source distribution
+Module defining source surface-brightness distributions.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 import warnings
 import numpy
@@ -56,6 +65,20 @@ class Source:
     def make_map(self, sampling=None, size=None):
         """
         Generate a square map of the surface-brightness distribution.
+
+        Object is modified internally with the constructed map saved
+        to :attr:`data`.
+
+        Args:
+            sampling (:obj:`float`, optional):
+                The size of each pixel in the map, typically in
+                arcsec per pixel. If None, sampling will be set by
+                :func:`minimum_sampling`.
+            size (:obj:`float`, optional):
+                Length of one axis of the *square* map, typically in
+                arcsec. Will be adjusted to ensure an integer number
+                of pixels in the map based on :attr:`sampling`. If
+                None, set by :func:`minimum_size`.
         """
         if sampling is None and self.sampling is None:
             self.sampling = self.minimum_sampling()
@@ -93,15 +116,18 @@ class Source:
 
     @property
     def shape(self):
+        """The shape of the current map."""
         return () if self.data is None else self.data.shape
 
     def reset_map(self):
         """
         Reset mapping attributes for a fresh determination of the
-        sampling, size, and surface-brightness map. This is mainly
-        used for resetting the internals when using the default
-        sampling and size to set the map. To reconstruct the map
-        after calling this method, run :func:`make_map`.  This::
+        sampling, size, and surface-brightness map.
+
+        This is mainly used for resetting the internals when using
+        the default sampling and size to set the map. To reconstruct
+        the map after calling this method, run :func:`make_map`.
+        This::
 
             self.reset_map()
             self.make_map()
@@ -230,6 +256,7 @@ class OnSkyGaussian(functional_models.Gaussian2D, Source):
             self.make_map()
 
     def get_integral(self):
+        """Return the analytic integral of the source."""
         sig2fwhm = numpy.sqrt(8*numpy.log(2))
         major_sigma = self.fwhm/sig2fwhm
         minor_sigma = major_sigma * (1-self.ellipticity)
@@ -312,9 +339,10 @@ class OnSkySersic(functional_models.Sersic2D, Source):
 
     def get_integral(self):
         """
-        The integral of the Sersic profile projected on the sky.  Note
-        the (1-ellipticity) factor.
+        The analytic integral of the Sersic profile projected on the
+        sky.
         """
+        # Note the (1-ellipticity) factor.
         self.bn = special.gammaincinv(2. * self.n, 0.5)
         return 2 * numpy.pi * self.n * numpy.exp(self.bn) * self.amplitude \
                             * numpy.square(self.r_eff) * (1-self.ellip) \
@@ -343,27 +371,30 @@ class OnSkySersic(functional_models.Sersic2D, Source):
 
 class OnSkySource(Source):
     """
-    Container class for an on-sky source convolved with the seeing disk.
+    Container class for an on-sky source convolved with the seeing
+    disk.
 
-    Unlike the other `Source`s, this requires a map to work.
+    Unlike the other :class:`Source` objects, this requires a map to
+    work.
 
     Args:
         seeing (:obj:`float`, :class:`Source`):
-            The FWHM of a Gaussian seeing distribution in arcseconds or
-            an object used to define the seeing kernel directly.  If a
-            float is provided, the sampling of the Gaussian seeing
-            kernel is set by `OnSkyGaussian.minimum_sampling` unless
-            adjusted by the intrinsic source object or the `sampling`
-            keyword.  If a :class:`Source` object, the object is used to
+            The FWHM of a Gaussian seeing distribution in arcseconds
+            or an object used to define the seeing kernel directly.
+            If a float is provided, the sampling of the Gaussian
+            seeing kernel is set by
+            :func:`OnSkyGaussian.minimum_sampling` unless adjusted by
+            the intrinsic source object or the ``sampling`` keyword.
+            If a :class:`Source` object, the object is used to
             generate a map of the source surface brightness
-            distribution.  The integral of the seeing kernel should be
+            distribution. The integral of the seeing kernel should be
             unity!
         intrinsic (:obj:`float`, :class:`Source`):
-            The intrinsic surface brightness distribution of the source.
-            Can be the total flux of a point source (in, e.g., 10^-17
-            erg/s/cm^2/angstrom) or an object.  If a :class:`Source`
-            object, the object is used to generate a map of the source
-            surface brightness distribution.
+            The intrinsic surface brightness distribution of the
+            source. Can be the total flux of a point source (in,
+            e.g., 10^-17 erg/s/cm^2/angstrom) or an object. If a
+            :class:`Source` object, the object is used to generate a
+            map of the source surface-brightness distribution.
         sampling (scalar-like, optional):
             Sampling of a generated map in arcseconds per pixel.
             Default is set by :func:`minimum_sampling`.
@@ -390,6 +421,13 @@ class OnSkySource(Source):
         self.make_map()
 
     def minimum_sampling(self):
+        r"""
+        Return the minimum sampling in arcseconds per pixels.
+
+        This is determined by the minimum of the seeing disk sampling
+        (:attr:`seeing`) and the sampling for the intrinsic
+        distribution (if the latter is defined).
+        """
         # Sampling in arcsec / pixel
         sampling = self.seeing.minimum_sampling()
         try:
@@ -400,6 +438,14 @@ class OnSkySource(Source):
         return sampling
 
     def minimum_size(self):
+        """
+        Return the minimum size of the rendered source map in
+        arcseconds.
+
+        This is determined by the maximum of the seeing disk map size
+        (:attr:`seeing`) and the intrinsic source map size (if the
+        latter is defined).
+        """
         # Size in arcsec
         size = self.seeing.minimum_size()
         try:
@@ -410,6 +456,24 @@ class OnSkySource(Source):
         return size
 
     def make_map(self, sampling=None, size=None):
+        """
+        Generate a square map of the source surface-brightness
+        distribution.
+
+        Object is modified internally with the constructed map saved
+        to :attr:`data`.
+
+        Args:
+            sampling (:obj:`float`, optional):
+                The size of each pixel in the map in arcsec per
+                pixel. If None, sampling will be set by
+                :func:`minimum_sampling`.
+            size (:obj:`float`, optional):
+                Length of one axis of the *square* map in arcsec.
+                Will be adjusted to ensure an integer number of
+                pixels in the map based on :attr:`sampling`. If None,
+                set by :func:`minimum_size`.
+        """
         if sampling is None and self.sampling is None:
             self.sampling = self.minimum_sampling()
         elif sampling is not None:
@@ -458,10 +522,24 @@ class OnSkySource(Source):
 
     def __call__(self, x, y):
         """
-        Sample the source.  This interpolates the pre-calcuated source
-        at the requested coordinate.  A `ValueError` will be thrown (see
-        `scipy.interpolate.interp2d`) if the coordinate is outsize the
-        bounds of the calculated map.
+        Sample the source.
+
+        This interpolates the pre-calculated source at the requested
+        coordinate. A `ValueError` will be thrown (see
+        `scipy.interpolate.interp2d`_) if the coordinate is outside
+        the bounds of the calculated map.
+
+        Args:
+            x (:obj:`float`):
+                The position in arcsec relative to the field center.
+                Positive x is toward the East (positive RA, smaller
+                pixel number).
+            y (:obj:`float`):
+                The position in arcsec relative to the field center.
+                Positive x is toward the North (larger pixel number).
+
+        Returns:
+            :obj:`float`: The surface brightness at (x,y).
         """
         return self.interp(x,y)
 

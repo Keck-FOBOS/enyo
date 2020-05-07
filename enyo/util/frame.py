@@ -2,6 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 Provides a set of coordinate frames.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 
 import numpy

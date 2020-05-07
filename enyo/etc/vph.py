@@ -1,5 +1,16 @@
 """
 Various efficiency calculations
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 import os
 import warnings
@@ -19,6 +30,9 @@ from . import efficiency
 
 class VPHGrating:
     """
+    Object for generic computations for a volume-phase holographic
+    grating.
+    
     Args:
         line_density (:obj:`float`):
             Line density of the grating in lines per mm.
@@ -40,7 +54,7 @@ class VPHGrating:
             angstroms to allow for any calculations for this grating.
             If None, no limits are imposed. Elements of the tuple can
             be None, meaning the specific limit is undefined; i.e.,
-            to define an upper limit, you would provide
+            to define an upper limit only, set
             ``wave_lim=(None,5400)``.
     """
     def __init__(self, line_density, n_bulk, n_mod, thickness, peak_wave=None, wave_lim=None):
@@ -93,6 +107,12 @@ class VPHGrating:
 
     @property
     def peak_wave(self):
+        """
+        The wavelength with the peak super-blaze efficiency.
+
+        Computation is approximate based on sampling the super-blaze
+        and picking the sample with the highest efficiency.
+        """
         if self._peak_wave is not None:
             return self._peak_wave
         if self.wave_lim is None or self.wave_lim[0] is None or self.wave_lim[1] is None:
@@ -106,6 +126,9 @@ class VPHGrating:
 
     def littrow_wavelength(self, alpha, m=1):
         """
+        Compute the Littrow wavelength at the provided incidence
+        angle.
+
         Args:
             alpha (:obj:`float`):
                 Incidence angle in degrees.
@@ -120,6 +143,9 @@ class VPHGrating:
 
     def littrow_angle(self, wave, m=1):
         """
+        Calculate the Littrow indicence angle for the provided
+        wavelength.
+
         Args:
             wave (:obj:`float`):
                 Wavelength in angstroms.
@@ -171,6 +197,8 @@ class VPHGrating:
             wave (:obj:`float`, `numpy.ndarray`_):
                 Wavelength at which to calculate the Bragg angle
                 (angstroms in air).
+            radians (:obj:`bool`, optional):
+                Provide the angle in radians, instead of degrees.
 
         Returns:
             :obj:`float`, `numpy.ndarray`_, `numpy.ma.MaskedArray`_:
@@ -237,6 +265,26 @@ class VPHGrating:
         return self._return(wave, s+p, indx)
 
     def diffraction_angle(self, wave, alpha=None, m=1, radians=False):
+        """
+        Compute the diffraction angle for the provided wavelengths.
+
+        Args:
+            wave (:obj:`float`, `numpy.ndarray`_):
+                Wavelengths for the computation.
+            alpha (:obj:`float`, optional):
+                The angle of incidence on the grating. If None, the
+                angle is the Bragg angle **for each wavelength**;
+                ie., you should basically always be providing
+                ``alpha``.
+            m (:obj:`int`, optional):
+                Grating order.
+            radians (:obj:`bool`, optional):
+                Provide the angle in radians, instead of degrees.
+
+        Returns:
+            :obj:`float`, `numpy.ndarray`_, `numpy.ma.MaskedArray`_:
+            The angle of diffraction for each wavelength.
+        """
         _wave, indx = self._check_wavelengths(wave)
         _alpha = self.bragg_angle(_wave[indx], radians=True) \
                     if alpha is None else numpy.radians(alpha)
@@ -244,6 +292,24 @@ class VPHGrating:
         return self._return(wave, beta if radians else numpy.degrees(beta), indx)
 
     def diffracted_wave(self, beta, alpha=None, m=1):
+        """
+        Compute the wavelength at the provided angle of diffraction.
+
+        Args:
+            beta (:obj:`float`):
+                Angle of diffraction.
+            alpha (:obj:`float`, optional):
+                The angle of incidence on the grating. If None,
+                assumed to be the same as the diffraction angle and
+                the Littrow wavelength is returned; see
+                :func:`littrow_wavelength`.
+            m (:obj:`int`, optional):
+                Grating order.
+
+        Returns:
+            :obj:`float`: Wavelength in angstroms at the provided
+            angle of diffraction.
+        """
         if alpha is None:
             return self.littrow_wavelength(beta, m=m)
         return (numpy.sin(numpy.radians(alpha)) + numpy.sin(numpy.radians(beta))) * 1e7 \
@@ -251,10 +317,22 @@ class VPHGrating:
 
     def angular_dispersion(self, wave, alpha=None, m=1):
         """
-        Return the linear dispersion in radians per angstrom.
+        Return the angular dispersion in radians per angstrom.
 
         Args:
+            wave (:obj:`float`, `numpy.ndarray`_):
+                Wavelengths for the computation.
+            alpha (:obj:`float`, optional):
+                The angle of incidence on the grating. If None, the
+                angle is the Bragg angle **for each wavelength**;
+                ie., you should basically always be providing
+                ``alpha``.
+            m (:obj:`int`, optional):
+                Grating order.
 
+        Returns:
+            :obj:`float`, `numpy.ndarray`_, `numpy.ma.MaskedArray`_:
+            The angular dispersion in radians per angstrom.
         """
         _wave, indx = self._check_wavelengths(wave)
         beta = self.diffraction_angle(_wave[indx], alpha=alpha, m=m, radians=True)

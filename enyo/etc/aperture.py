@@ -1,7 +1,16 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
 """
 Define apertures to use for on-sky integrations.
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 
 import os
@@ -102,7 +111,7 @@ class Aperture:
         corners of the grid cells cross the boundary of the aperture.
 
     Args:
-        shape (shapely.geometry.base.BaseGeometry):
+        shape (`shapely.geometry.base.BaseGeometry`_):
             A shape object from the Shapely python package.
     """
     def __init__(self, shape):
@@ -110,12 +119,13 @@ class Aperture:
         self.shape = shape
 
     def response(self, x, y, method='fractional'):
-        """
-        Compute the response function of the aperture to the sky over a
-        regular grid.
-
-        The integral of the returned map is normalized to the area of
+        r"""
+        Compute the response function of the aperture to the sky over
+        a regular grid. This is the same as rendering an "image" of
         the aperture.
+
+        The integral of the returned map is normalized to the
+        aperture area.
 
         Args:
             x (array-like):
@@ -126,7 +136,8 @@ class Aperture:
                 linearly spaced.
             method (:obj:`str`, optional):
                 Method used to construct the overlap grid.  Options
-                are::
+                are:
+
                     - 'whole': Any grid cell with its center inside the
                       aperture is set to the area of the grid cell.  All
                       others set to 0.
@@ -135,8 +146,9 @@ class Aperture:
                       aperture.
     
         Returns:
-            numpy.ndarray: An array with shape (nx, ny) with the
-            fraction of each grid cell covered by the aperture.
+            `numpy.ndarray`_: An array with shape :math:`(N_x, N_y)`
+            with the fraction of each grid cell covered by the
+            aperture.
 
         Raises:
             ValueError:
@@ -225,8 +237,8 @@ class Aperture:
 
     def _overlapping_region(self, x, y):
         r"""
-        Return the starting and indices of the grid cells that overlap
-        with the shape bounds.
+        Return the starting and ending indices of the grid cells that
+        overlap with the shape bounds.
 
         Args:
             x (array-like):
@@ -237,10 +249,10 @@ class Aperture:
                 linearly spaced.
         
         Returns:
-            tuple: Returns the integer starting and ending x index, the
-            grid step in x, the starting and ending y index, and the
-            grid step in y for the region of the grid that overlaps the
-            shape boundary.
+            :obj:`tuple`: Returns six scalars: the starting and
+            ending x index, the grid step in x, the starting and
+            ending y index, and the grid step in y for the region of
+            the grid that overlaps the shape boundary.
         """
         # Get the cell size
         dx = abs(x[1]-x[0])
@@ -266,7 +278,7 @@ class Aperture:
 
     def _overlapping_grid_polygons(self, x, y):
         r"""
-        Construct the list grid-cell polygons (rectangles) that are
+        Construct a list of grid-cell polygons (rectangles) that are
         expected to overlap the aperture.
 
         The list of polygons follows array index order.  I.e., polygon
@@ -286,13 +298,16 @@ class Aperture:
                 linearly spaced.
         
         Returns:
-            Five objects are returned:
-                - A list of shapely.geometry.polygon.Polygon objects, on
-                  per grid cell.  Only those grid cells that are
-                  expected to overlap the shape's bounding box are
-                  included.
-                - The starting and ending x index and the starting and
-                  ending y index for the returned list of cell polygons.
+            :obj:`tuple`: Five objects are returned:
+
+                - A list of `shapely.geometry.polygon.Polygon`_
+                  objects, one per grid cell. Only those grid cells
+                  that are expected to overlap the shape's bounding
+                  box are included.
+                - The starting and ending x index and the starting
+                  and ending y index for the returned list of cell
+                  polygons.
+
         """
         sx, ex, dx, sy, ey, dy = self._overlapping_region(x, y)
 
@@ -310,16 +325,18 @@ class Aperture:
 
     @property
     def area(self):
+        """The area of the aperture."""
         return self.shape.area
 
     @property
     def bounds(self):
+        """The bounding box of the aperture."""
         return self.shape.bounds
 
     def integrate_over_source(self, source, response_method='fractional', sampling=None,
                               size=None):
         """
-        Integrate a source over the aperture.
+        Integrate the flux of a source over the aperture.
 
         This is done by generating an image of the aperture over the map
         of the source surface-brightness distribution, using
@@ -331,23 +348,32 @@ class Aperture:
         See also: :func:`Aperture.map_integral_over_source`.
 
         .. todo::
-            Require source to be a :class:`enyo.etc.source.Source` object?
+
+            No type checking is done to require that ``source`` is a
+            :class:`~enyo.etc.source.Source` object, but the code
+            will barf if it isn't.
 
         Args:
-            source (:class:`enyo.etc.source.Source`):
+            source (:class:`~enyo.etc.source.Source`):
                 Source surface-brightness distribution
-            response_method (str):
-                See `method` argument for :func:`Aperture.response`.
+            response_method (:obj:`str`, optional):
+                See ``method`` argument for
+                :func:`Aperture.response`.
             sampling (:obj:`float`, optional):
-                Sampling of the square map in arcsec/pixel.  If not
-                None, the source map is reconstructed.
+                Sampling of the square map in arcsec/pixel. If not
+                None, the source map is (re)constructed.
             size (:obj:`float`, optional):
                 Size of the square map in arcsec.  If not None, the
-                source map is reconstructed.
+                source map is (re)constructed.
 
         Returns:
-            float: The integral of the source over the aperture.
+            :obj:`float`: The integral of the source over the
+            aperture.
 
+        Raises:
+            ValueError:
+                Raised if the source map has not been constructed and
+                ``sampling`` and ``size`` are both None.
         """
         if source.data is None and sampling is None and size is None:
             raise ValueError('Must make a map of the source first.')
@@ -371,33 +397,39 @@ class Aperture:
         by convolving the the source distribution and the aperture
         image.
 
-        See also :func:`Aperture.integrate_over_source`.  A single call
-        to this function or :func:`Aperture.map_integral_over_source` to
-        get the integral with no offset of the aperture are marginally
-        different.  However, use of this function is much more efficient
-        if you want to calculate the integral of the source over many
+        See also :func:`Aperture.integrate_over_source`. A single
+        call to this function or
+        :func:`Aperture.integrate_over_source` to get the integral
+        with no offset of the aperture are marginally different.
+        However, use of this function is much more efficient if you
+        want to calculate the integral of the source over many
         positional offsets of the aperture.
         
         .. todo::
-            Require source to be a :class:`enyo.etc.source.Source` object?
+
+            No type checking is done to require that ``source`` is a
+            :class:`~enyo.etc.source.Source` object, but the code
+            will barf if it isn't.
 
         Args:
-            source (:class:`enyo.etc.source.Source`):
+
+            source (:class:`~enyo.etc.source.Source`):
                 Source surface-brightness distribution
-            response_method (str):
-                See `method` argument for :func:`Aperture.response`.
+            response_method (:obj:`str`, optional):
+                See ``method`` argument for
+                :func:`Aperture.response`.
             sampling (:obj:`float`, optional):
-                Sampling of the square map in arcsec/pixel.  If not
-                None, the source map is reconstructed.
+                Sampling of the square map in arcsec/pixel. If not
+                None, the source map is (re)constructed.
             size (:obj:`float`, optional):
                 Size of the square map in arcsec.  If not None, the
-                source map is reconstructed.
+                source map is (re)constructed.
 
         Returns:
-            numpy.ndarray: The integral of the source over the aperture
-            with the aperture centered at any position in the map.
-            The integral with no offset between the image of the
-            aperture and the image of the source is::
+            `numpy.ndarray`_: The integral of the source over the
+            aperture with the aperture centered at any position in
+            the map. The integral with no offset between the image of
+            the aperture and the image of the source is::
 
                 cy = source.data.shape[0]//2
                 cx = source.data.shape[1]//2
@@ -434,22 +466,22 @@ class FiberAperture(Aperture):
 
     Args:
         cx (scalar-like):
-            Center X coordinate.
+            Center X coordinate, typically 0.
         cy (scalar-like):
-            Center Y coordinate.
+            Center Y coordinate, typically 0.
         d (scalar-like):
             Fiber diameter.  Aperture is assumed to be a circle resolved
             by a set of line segments.
         resolution (:obj:`int`, optional):
-            Set the "resolution" of the circle.  Higher numbers mean
-            more line segments are used to define the circle, but there
-            isn't a 1-1 correspondence.  See shapely.buffer_.  Default
-            is to use shapely_ default.
+            Set the "resolution" of the circle. Higher numbers mean
+            more line segments are used to define the circle, but
+            there isn't a 1-1 correspondence. See `shapely.buffer`_.
+            Default is to use the `shapely`_ default.
 
     Attributes:
-        center (list):
+        center (:obj:`list`):
             Center x and y coordinate.
-        diameter (float):
+        diameter (:obj:`float`):
             Fiber diameter
     """
     def __init__(self, cx, cy, d, resolution=None):
@@ -463,8 +495,8 @@ class SlitAperture(Aperture):
     """
     Define a slit aperture.
 
-    The orientation of the slit is expected to have the length along the
-    y axis and the width along the x axis.  The rotation is
+    The orientation of the slit is expected to have the length along
+    the y axis and the width along the x axis. The rotation is
     counter-clockwise in a right-handed Cartesian frame.
 
     Note that the units for the center, width, and length are only
@@ -472,16 +504,17 @@ class SlitAperture(Aperture):
     should typically be in arcseconds, with the center being relative
     to the source to observe.
 
-    Exactly the same aperture is obtained in the following two calls::
+    Exactly the same aperture is obtained in the following two
+    calls::
 
         s = SlitAperture(0., 0., 1, 10)
         ss = SlitAperture(0., 0., 10, 1, rotation=90)
 
     Args:
         cx (scalar-like):
-            Center X coordinate.
+            Center X coordinate, typically 0.
         cy (scalar-like):
-            Center Y coordinate.
+            Center Y coordinate, typically 0.
         width (scalar-like):
             Slit width along the unrotated x axis.
         length (scalar-like):
@@ -490,13 +523,13 @@ class SlitAperture(Aperture):
             Cartesian rotation of the slit in degrees.
 
     Attributes:
-        center (list):
+        center (:obj:`list`):
             Center x and y coordinate.
-        width (float):
+        width (:obj:`float`):
             Slit width
-        length (float):
+        length (:obj:`float`):
             Slit length
-        rotation (float):
+        rotation (:obj:`float`):
             Slit rotation (deg)
     """
     def __init__(self, cx, cy, width, length, rotation=0.):

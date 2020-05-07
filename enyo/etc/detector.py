@@ -1,7 +1,16 @@
-#!/bin/env/python3
-# -*- encoding utf-8 -*-
 """
 Detector class
+
+----
+
+.. include license and copyright
+.. include:: ../include/copy.rst
+
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
+
 """
 
 import os
@@ -17,7 +26,7 @@ class Detector(Efficiency):
         shape (:obj:`tuple`, optional):
             Dimensions of the detector in number of pixels along the
             spectral axis and number of pixels along the spatial
-            axis.  Can be None, but limits use if it is.
+            axis. Can be None, but limits use if it is.
         pixelsize (:obj:`float`, optional):
             The size of the (square) detector pixels in *micron*.
         rn (:obj:`float`, optional):
@@ -54,13 +63,3 @@ class Detector(Efficiency):
             super(Detector, self).__init__(qe)
         else:
             super(Detector, self).__init__(qe.eta, wave=qe.wave)
-
-#    def focalplane2pixel(self, x, y):
-#        """
-#        Convert a focal-plane position in mm to the detector pixel
-#        number.
-
-
-# TODO: Define detector array
-
-

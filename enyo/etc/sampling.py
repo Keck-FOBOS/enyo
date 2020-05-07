@@ -3,16 +3,15 @@
 """
 Provides a set of functions to handle resampling.
 
-*License*:
-    Copyright (c) 2018, SDSS-IV/MaNGA Pipeline Group
-        Licensed under BSD 3-clause license - see LICENSE.rst
+----
 
-*Source location*:
-    $MANGADAP_DIR/python/mangadap/util/resample.py
+.. include license and copyright
+.. include:: ../include/copy.rst
 
-*Revision history*:
-    | **30 Aug 2018**: Moved here from old instrument.py module by K.
-        Westfall (KBW).
+----
+
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
 """
 import warnings
 

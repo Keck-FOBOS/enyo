@@ -1,70 +1,80 @@
 """
-Class to construct an observation
+Module used to mimic observations.
 
-Extraction:
-    - fiber-extraction aperture (pixels, optimal?)
-    - fiber PSF FWHM on detector (pixels)
+----
 
-    - spectral resolution (R)
-    - dispersion on detector (A per pixel)
+.. include license and copyright
+.. include:: ../include/copy.rst
 
-Detector:
-    - arcsec / pixel (spatial)
-    - angstrom / pixel (spectral)
-    - detector readnoise (e-)
-    - detector darkcurrent (e-/hour)
+----
 
-Throughput
-    - spectrograph throughput
-        - detector QE
-        - camera efficiency
-        - grating efficiency
-        - focal-plane to grating tansmission efficiency
-            - foreoptics, lenslet, coupling, fiber transmission, FRD,
-              collimator, dichroic(s)
-
-    - top-of-telescope throughput
-        - telescope efficiency
-        - spectrograph efficiency
-
-Point-source Aperture losses
-    - fiber diameter (arcsec, mm)
-    - focal-plane plate scale (arcsec/mm)
-    - seeing (arcsec)
-    - pointing error (arcsec)
-
-*Source:
-    - source spectrum (1e-17 erg/s/cm^2/angstrom)
-
-    - point source
-        - source mag (at wavelength/in band above)
-
-    - extended source
-        - source surface brightness (at wavelength/in band above)
-        - source size (kpc/arcsec)
-        - cosmology
-
-    - source velocity/redshift
-
-*Sky:
-    - sky spectrum (1e-17 erg/s/cm^2/angstrom)
-
-Observation:
-    - obs date
-    - lunar phase/illumination (days, fraction)
-    - sky coordinates
-    - wavelength for calculation (angstroms)
-    - band for calculation
-    - sky surface brightness (mag/arcsec^2, at wavelength/in band above)
-    - airmass
-    - exposure time (s)
-
-Telescope:
-    - location
-    - telescope diameter (or effective) (m^2)
-    - central obstruction
-
+.. include common links, assuming primary doc root is up one directory
+.. include:: ../include/links.rst
 """
+
+#Extraction:
+#    - fiber-extraction aperture (pixels, optimal?)
+#    - fiber PSF FWHM on detector (pixels)
+#
+#    - spectral resolution (R)
+#    - dispersion on detector (A per pixel)
+#
+#Detector:
+#    - arcsec / pixel (spatial)
+#    - angstrom / pixel (spectral)
+#    - detector readnoise (e-)
+#    - detector darkcurrent (e-/hour)
+#
+#Throughput
+#    - spectrograph throughput
+#        - detector QE
+#        - camera efficiency
+#        - grating efficiency
+#        - focal-plane to grating tansmission efficiency
+#            - foreoptics, lenslet, coupling, fiber transmission, FRD,
+#              collimator, dichroic(s)
+#
+#    - top-of-telescope throughput
+#        - telescope efficiency
+#        - spectrograph efficiency
+#
+#Point-source Aperture losses
+#    - fiber diameter (arcsec, mm)
+#    - focal-plane plate scale (arcsec/mm)
+#    - seeing (arcsec)
+#    - pointing error (arcsec)
+#
+#*Source:
+#    - source spectrum (1e-17 erg/s/cm^2/angstrom)
+#
+#    - point source
+#        - source mag (at wavelength/in band above)
+#
+#    - extended source
+#        - source surface brightness (at wavelength/in band above)
+#        - source size (kpc/arcsec)
+#        - cosmology
+#
+#    - source velocity/redshift
+#
+#*Sky:
+#    - sky spectrum (1e-17 erg/s/cm^2/angstrom)
+#
+#Observation:
+#    - obs date
+#    - lunar phase/illumination (days, fraction)
+#    - sky coordinates
+#    - wavelength for calculation (angstroms)
+#    - band for calculation
+#    - sky surface brightness (mag/arcsec^2, at wavelength/in band above)
+#    - airmass
+#    - exposure time (s)
+#
+#Telescope:
+#    - location
+#    - telescope diameter (or effective) (m^2)
+#    - central obstruction
+
 import os
 import warnings
 
@@ -76,29 +86,61 @@ from scipy import signal
 
 from matplotlib import pyplot
 
-from . import source, efficiency, telescopes, spectrum, extract, aperture, util, detector
+from . import source, spectrum, util
 
 class Observation:
     """
-    Observation of the sky with or without a non-terrestrial source.
-
-    update this!!
+    Observation of the sky with or without a source.
 
     Args:
-        telescope
+        telescope (:class:`~enyo.etc.telescopes.Telescope`):
+            Telescope used for the observation.
+        sky_spectrum (:class:`~enyo.etc.spectrum.Spectrum`):
+            Sky spectrum
+        spec_aperture (:class:`~enyo.etc.aperture.Aperture`):
+            On-sky entrance aperture.
+        exposure_time (:obj:`float`):
+            Exposure time in seconds.
+        detector (:class:`~enyo.etc.detector.Detector`):
+            Instrument detector object.
+        system_throughput (:class:`~enyo.etc.efficiency.Efficiency`, optional):
+            System throughput; i.e., ratio of the number of photons
+            detected to the total number incident on the telescope
+            primary.  If None, system throughput is unity.
+        atmospheric_throughput (:class:`~enyo.etc.efficiency.Efficiency`, optional):
+            Atmospheric throughput; i.e., the ratio of the number of
+            the photons incident on the telescope primary to the
+            number of photons hitting the top of the atmosphere. If
+            None, assume there is no atmosphere.
+        airmass (:obj:`float`, optional):
+            Airmass of the observation. If None, assume
+            ``atmospheric_throughput`` is at the correct airmass or
+            there is no atmosphere.
+        onsky_source_distribution (:class:`~enyo.etc.source.Source`, optional):
+            On-sky source surface-brightness distribution, including
+            any seeing effects. If None, assume observation is only
+            of the sky. Normalization is irrelevant; used to
+            calculate aperture losses.
+        source_spectrum (:class:`~enyo.etc.spectrum.Spectrum`, optional):
+            Spectrum of the source with the flux normalized to the
+            *total* source flux.
+        extraction (:class:`~enyo.etc.extract.Extraction`, optional):
+            Object used to calculate the extraction losses and tally
+            the number of pixels included in the extraction to get
+            the read-noise hit. TODO: Currently *cannot* be None;
+            make a required argument.
+        snr_units (:obj:`str`, optional):
+            Units of the S/N calculation. Must be ``'pixel'``,
+            ``'angstrom'``, or ``'resolution'`` for S/N per pixel,
+            per angstrom, or per resolution element.
 
-    if atmospheric throughput is not provided, assume Maunakea curve
-    if airmass is None, use default defined by atmospheric throughput class/instance
-
-    if sky spectrum is None, assume dark Maunakea sky
-    if sky distribution is None, assume constant
-
-    if source or source distribution are None (must provide both), assume a sky-only exposure
-
-    if extraction is None, provide 2d result; otherwise return 1D extraction
-
-    per_resolution_element means apply a factor that converts the
-    signal from per angstrom to per resolution element
+    Raises:
+        ValueError:
+            Raised if the requested S/N units cannot be calculated
+            (i.e., the provided spectrum does not define the
+            resolution meaning that the S/N per resolution element is
+            undefined) or if the unit string for the S/N is not
+            recognized.
 
     """
     def __init__(self, telescope, sky_spectrum, spec_aperture, exposure_time, detector,
@@ -195,7 +237,26 @@ class Observation:
 
     def simulate(self, sky_only=False, sky_sub=False, sky_err=0.1):
         """
-        Return a simulated spectrum
+        Return a simulated spectrum.
+
+        Args:
+            sky_only (:obj:`bool`, optional):
+                Only include the sky flux in the simulated spectrum
+                (no object flux)
+            sky_sub (:obj:`bool`, optional):
+                Provide the object spectrum only, but include the sky
+                flux shot noise and additional error from the sky
+                subtraction.
+            sky_err (:obj:`float`, optional):
+                The fraction of the total sky error incurred due to
+                the sky subtraction. Should be between 0 and 1; 0
+                means no additional error is incurred, 1 means that
+                the sky noise from the sky subtration is the same as
+                the sky noise from the observation itself.
+
+        Returns:
+            :class:`~enyo.etc.spectrum.Spectrum`: The simulated
+            spectrum.
         """
         if sky_only:
             shot_var = self.sky_shot_var
@@ -225,6 +286,27 @@ class Observation:
                                          else self.source_spectrum.log)
 
     def snr(self, sky_sub=False, sky_err=0.1):
+        """
+        Calculate the S/N.
+
+        Args:
+            sky_sub (:obj:`bool`, optional):
+                Provide the object spectrum only, but include the sky
+                flux shot noise and additional error from the sky
+                subtraction.
+            sky_err (:obj:`float`, optional):
+                The fraction of the total sky error incurred due to
+                the sky subtraction. Should be between 0 and 1; 0
+                means no additional error is incurred, 1 means that
+                the sky noise from the sky subtration is the same as
+                the sky noise from the observation itself.
+
+        Returns:
+            :class:`~enyo.etc.spectrum.Spectrum`: The S/N spectrum.
+            WARNING: Here, :class:`~enyo.etc.spectrum.Spectrum` is
+            used as a container class for the S/N vector; some
+            functionality of the class will not be valid!
+        """
         flux = self.object_flux + self.sky_flux
         var = self.obj_shot_var + self.sky_shot_var + self.read_var
         if sky_sub:
@@ -240,13 +322,14 @@ def monochromatic_image(sky, spec_aperture, spec_kernel, platescale, pixelsize, 
                         scramble=False):
     """
     Generate a monochromatic image of the sky, with or with out a
-    non-terrestrial source, taken by a spectrograph through an
-    aperture.
+    source, taken by a spectrograph through an aperture.
 
     .. warning::
+
         - May resample the `source` and `spec_kernel` maps.
 
     .. todo::
+
         - Add effect of differential atmospheric refraction
         - Allow a force map size and pixel sampling
 
@@ -334,6 +417,8 @@ def twod_spectrum(sky_spectrum, spec_aperture, spec_kernel, platescale, linear_d
                   pixelsize, source_distribution=None, source_spectrum=None, thresh=None,
                   scramble=False, wave_lim=None, field_coo=None, opticalmodel=None):
     """
+    Documentation TBW.
+
     if optical model is not provided:
         - ignore field_coo
         - return rectilinear 2D spectrum
@@ -460,6 +545,8 @@ def twod_spectrum(sky_spectrum, spec_aperture, spec_kernel, platescale, linear_d
 def rectilinear_twod_spectrum(spectrum, aperture_image, dispscale, wave_lim=None, oversample=1):
     """
     Construct a rectilinear 2D spectrum.
+
+    Documentation TBW.
 
     spectral dimension of aperture_image is along the first axis
 
