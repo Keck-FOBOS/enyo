@@ -4,7 +4,9 @@ Scripts
 WFOS
 ----
 
-To run the TMT-WFOS exposure-time calculator::
+To run the TMT-WFOS exposure-time calculator:
+
+.. code-block:: console
 
     % wfos_etc -h
     usage: wfos_etc [-h] [--spec_file SPEC_FILE] [--spec_wave SPEC_WAVE]
