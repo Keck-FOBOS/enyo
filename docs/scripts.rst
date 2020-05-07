@@ -1,6 +1,7 @@
 Scripts
 =======
 
-Primary scripts are:
+WFOS
+----
 
-1) ``wfos_etc``:
+To run the TMT-WFOS exposure-time calculator:
