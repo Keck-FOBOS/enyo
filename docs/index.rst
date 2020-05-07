@@ -13,8 +13,8 @@ Welcome to enyo
    :target: https://coveralls.io/github/Keck-FOBOS/enyo?branch=master
    :alt: Coverage Status
 
-.. image:: https://readthedocs.org/projects/fobos-enyo/badge/?version=latest
-  :target: https://fobos-enyo.readthedocs.io/en/latest/
+.. image:: https://readthedocs.org/projects/enyo/badge/?version=latest
+  :target: https://enyo.readthedocs.io/en/latest/
   :alt: Documentation Status
 
 .. image:: https://img.shields.io/github/license/Keck-FOBOS/enyo
