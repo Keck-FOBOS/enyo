@@ -11,10 +11,16 @@ from setuptools import setup, find_packages
 import requests
 import warnings
 
-NAME = 'fobos-enyo'
 VERSION = '0.1.0dev'
 RELEASE = 'dev' not in VERSION
 MINIMUM_PYTHON_VERSION = '3.5'
+
+def get_package_data(root='enyo'):
+    """Generate the list of package data."""
+    return [os.path.relpath(f, root) 
+                    for f in glob.glob(os.path.join(root, 'data/*/*'))] \
+           + [os.path.relpath(f, root) 
+                    for f in glob.glob(os.path.join(root, 'data/README.md'))]
 
 #def get_data_files():
 #    """Generate the list of data files."""
@@ -32,9 +38,7 @@ def get_scripts():
     """ Grab all the scripts in the bin directory.  """
     scripts = []
     if os.path.isdir('bin'):
-        scripts = [ fname for fname in glob.glob(os.path.join('bin', '*'))
-                                if not os.path.basename(fname).endswith('.rst') and
-                                   not os.path.basename(fname).endswith('.bash') ]
+        scripts = [ fname for fname in glob.glob(os.path.join('bin', '*')) ]
     return scripts
 
 
@@ -46,10 +50,9 @@ def get_requirements():
     return install_requires
 
 
-#def run_setup(data_files, scripts, packages, install_requires):
-def run_setup(scripts, packages, install_requires):
+def run_setup(package_data, scripts, packages, install_requires):
 
-    setup(name=NAME,
+    setup(name='fobos-enyo',
           version=VERSION,
           license='BSD3',
           description='Keck-FOBOS Software Repository',
@@ -60,11 +63,13 @@ def run_setup(scripts, packages, install_requires):
           url='https://github.com/Keck-FOBOS/enyo',
           python_requires='>='+MINIMUM_PYTHON_VERSION,
           packages=packages,
-          package_dir={'': 'python'},
-#          package_data={'': data_files},
+          package_dir={'enyo': 'enyo'},
+          package_data={'enyo': package_data},
           include_package_data=True,
           install_requires=install_requires,
           scripts=scripts,
+          setup_requires=[ 'pytest-runner' ],
+          tests_require=[ 'pytest' ],
           classifiers=[
               'Development Status :: 4 - Beta',
               'Intended Audience :: Science/Research',
@@ -72,8 +77,7 @@ def run_setup(scripts, packages, install_requires):
               'Natural Language :: English',
               'Operating System :: OS Independent',
               'Programming Language :: Python',
-              'Programming Language :: Python :: 3.5',
-              'Programming Language :: Python :: 3.6',
+              'Programming Language :: Python :: 3.7',
               'Programming Language :: Python :: 3 :: Only',
               'Topic :: Documentation :: Sphinx',
               'Topic :: Scientific/Engineering :: Astronomy',
@@ -111,18 +115,21 @@ if __name__ == '__main__':
     # Compile the data files to include
 #    data_files = get_data_files()
 
+    # Get the package data (data inside the main product root)
+    package_data = get_package_data()
+
     # Compile the scripts in the bin/ directory
     scripts = get_scripts()
 
     # Get the packages to include
-    packages = find_packages(where='python')
+    packages = find_packages()
 
     # Collate the dependencies based on the system text file
     install_requires = get_requirements()
 
     # Run setup from setuptools
 #    run_setup(data_files, scripts, packages, install_requires)
-    run_setup(scripts, packages, install_requires)
+    run_setup(package_data, scripts, packages, install_requires)
 
 #    # Check if the environmental variables are found and warn the user
 #    # of their defaults
