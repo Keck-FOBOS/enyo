@@ -287,14 +287,10 @@ class Spectrum:
         if check:
             found_regular, found_log = Spectrum.assess_sampling(_wave)
             if self.regular != found_regular:
-                embed()
-                exit()
                 raise ValueError('Expected {0} sampling, found {1} sampling.'.format(
                                     'regular' if self.regular else 'irregular',
                                     'regular' if found_regular else 'irregular'))
             if self.log != found_log:
-                embed()
-                exit()
                 raise ValueError('Geometric sampling {0} found, but {1} expected.'.format(
                                     'was' if found_log else 'was not',
                                     'was' if self.log else 'was not'))

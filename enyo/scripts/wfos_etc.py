@@ -79,6 +79,10 @@ def parse_args(options=None):
                                  'set, the provided magnitude is assumed to be a surface '
                                  'brightness.  See the MAG option.')
 
+    parser.add_argument('--refl', default='req', type=str,
+                        help='Select the reflectivity curve for TMT.  Must be either \'req\' or '
+                             '\'goal\' for the required or goal reflectivity performance.')
+
     parser.add_argument('--blue_grat', default=TMTWFOSBlue.default_grating,
                         type=str, help='Grating to use in the blue arm.  Options are: {0}'.format(
                         ', '.join([g for g in WFOSGrating.available_gratings.keys() if 'B' in g])))
@@ -130,8 +134,8 @@ def parse_args(options=None):
     parser.add_argument('-a', '--airmass', default=1.0, type=float, help='Airmass')
     parser.add_argument('-i', '--ipython', default=False, action='store_true',
                         help='After completing the setup, embed in an IPython session.')
-    parser.add_argument('-p', '--plot', default=False, action='store_true',
-                        help='Provide a plot of the components of the calculation.')
+    parser.add_argument('-p', '--plot', default=True, action='store_false',
+                        help='Do not provide a plot of the components of the calculation.')
     parser.add_argument('--snr_units', type=str, default='pixel',
                         help='The units for the S/N.  Options are pixel, angstrom, resolution.')
 
@@ -370,7 +374,7 @@ def main(args):
 
     #-------------------------------------------------------------------
     # Blue Arm
-    blue_arm = TMTWFOSBlue(grating=args.blue_grat, cen_wave=args.blue_wave,
+    blue_arm = TMTWFOSBlue(reflectivity=args.refl, grating=args.blue_grat, cen_wave=args.blue_wave,
                            grating_angle=args.blue_angle)
 
     # Pixels per resolution element
@@ -431,7 +435,7 @@ def main(args):
 
     #-------------------------------------------------------------------
     # Red Arm
-    red_arm = TMTWFOSRed(grating=args.red_grat, cen_wave=args.red_wave,
+    red_arm = TMTWFOSRed(reflectivity=args.refl, grating=args.red_grat, cen_wave=args.red_wave,
                          grating_angle=args.red_angle)
 
     # Pixels per resolution element
@@ -500,6 +504,30 @@ def main(args):
     snr_label = 'S/N per {0}'.format('R element' if args.snr_units == 'resolution'
                                      else args.snr_units)
 
+    # Report
+    g = efficiency.FilterResponse(band='g')
+    r = efficiency.FilterResponse(band='r')
+#    iband = efficiency.FilterResponse(band='i')
+    print('-'*70)
+    print('{0:^70}'.format('WFOS S/N Calculation (v0.1)'))
+    print('-'*70)
+    print('Compute time: {0} seconds'.format(time.perf_counter() - t))
+    print('Object g- and r-band AB magnitude: {0:.1f} {1:.1f}'.format(
+                    obj_spectrum.magnitude(band=g), obj_spectrum.magnitude(band=r)))
+    print('Sky g- and r-band AB surface brightness: {0:.1f} {1:.1f}'.format(
+                    sky_spectrum.magnitude(band=g), sky_spectrum.magnitude(band=r)))
+    print('Exposure time: {0:.1f} (s)'.format(args.time))
+    if not args.uniform:
+        print('Aperture Loss: {0:.1f}%'.format((1-red_obs.aperture_factor)*100))
+#    print('Extraction Loss: {0:.1f}%'.format((1-obs.extraction.spatial_efficiency)*100))
+#    print('Median {0}: {1:.1f}'.format(snr_label, numpy.median(snr.flux)))
+#    print('g-band weighted mean {0} {1:.1f}'.format(snr_label,
+#                numpy.sum(g(snr.wave)*snr.flux)/numpy.sum(g(snr.wave))))
+#    print('r-band weighted mean {0} {1:.1f}'.format(snr_label,
+#                numpy.sum(r(snr.wave)*snr.flux)/numpy.sum(r(snr.wave))))
+#    print('i-band weighted mean {0} {1:.1f}'.format(snr_label,
+#                numpy.sum(iband(snr.wave)*snr.flux)/numpy.sum(iband(snr.wave))))
+ 
     if args.plot:
         w,h = pyplot.figaspect(1)
         fig = pyplot.figure(figsize=(1.5*w,1.5*h))
@@ -536,27 +564,5 @@ def main(args):
 
         pyplot.show()
 
-#    # Report
-#    g = efficiency.FilterResponse(band='g')
-#    r = efficiency.FilterResponse(band='r')
-#    iband = efficiency.FilterResponse(band='i')
-#    print('-'*70)
-#    print('{0:^70}'.format('FOBOS S/N Calculation (v0.2)'))
-#    print('-'*70)
-#    print('Compute time: {0} seconds'.format(time.perf_counter() - t))
-#    print('Object g- and r-band AB magnitude: {0:.1f} {1:.1f}'.format(
-#                    spec.magnitude(band=g), spec.magnitude(band=r)))
-#    print('Sky g- and r-band AB surface brightness: {0:.1f} {1:.1f}'.format(
-#                    sky_spectrum.magnitude(band=g), sky_spectrum.magnitude(band=r)))
-#    print('Exposure time: {0:.1f} (s)'.format(args.time))
-#    if not args.uniform:
-#        print('Aperture Loss: {0:.1f}%'.format((1-obs.aperture_factor)*100))
-#    print('Extraction Loss: {0:.1f}%'.format((1-obs.extraction.spatial_efficiency)*100))
-#    print('Median {0}: {1:.1f}'.format(snr_label, numpy.median(snr.flux)))
-#    print('g-band weighted mean {0} {1:.1f}'.format(snr_label,
-#                numpy.sum(g(snr.wave)*snr.flux)/numpy.sum(g(snr.wave))))
-#    print('r-band weighted mean {0} {1:.1f}'.format(snr_label,
-#                numpy.sum(r(snr.wave)*snr.flux)/numpy.sum(r(snr.wave))))
-#    print('i-band weighted mean {0} {1:.1f}'.format(snr_label,
-#                numpy.sum(iband(snr.wave)*snr.flux)/numpy.sum(iband(snr.wave))))
-#
+    if args.ipython:
+        embed()

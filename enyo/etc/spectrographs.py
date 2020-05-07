@@ -259,6 +259,8 @@ class SlitSpectrographArm:
     constants are undefined.
 
     Args:
+        telescope (:class:`~enyo.etc.telescopes.Telescope`):
+            Spectrograph telescope properties
         grating (:class:`~enyo.etc.vph.VPHGrating`):
             The grating object.
         cen_wave (:obj:`float`, optional):
@@ -283,12 +285,6 @@ class SlitSpectrographArm:
 
     """
 
-    telescope = None
-    """
-    :class:`~enyo.etc.telescopes.Telescope` instance with telescope
-    properties.
-    """
-
     det = None
     """
     :class:`~enyo.etc.detector.Detector` instance with the detector
@@ -301,8 +297,8 @@ class SlitSpectrographArm:
     focal_length_cam = None
     """Camera focal length in mm"""
 
-    cam_kernel = None
-    """Kernel instance with the imaging kernel."""
+#    cam_kernel = None
+#    """Kernel instance with the imaging kernel."""
 
     max_field_angle_cam = None
     """Maximum camera field entrance angle (radius) in deg."""
@@ -319,12 +315,14 @@ class SlitSpectrographArm:
     by the derived class.
     """
 
-    def __init__(self, grating, cen_wave=None, grating_angle=None):
+    def __init__(self, telescope, grating, cen_wave=None, grating_angle=None):
         # Check mutually exclusive input
         if cen_wave is None and grating_angle is None:
             raise ValueError('Must provide cen_wave or grating_angle.')
         if cen_wave is not None and grating_angle is not None:
             raise ValueError('Cannot provide both cen_wave or grating_angle.')
+
+        self.telescope = telescope
 
         # Setup the grating
         self.grating = grating
@@ -690,6 +688,9 @@ class TMTWFOSArm(SlitSpectrographArm):
     Instance of :class:`SlitSpectrographArm` specific to TMT-WFOS.
 
     Args:
+        reflectivity (:obj:`str`, optional):
+            The reflectivity curve to use. For the ORD requirement or
+            goal, use ``'req'`` or ``'goal'``, respectively.
         grating (:obj:`str`, optional):
             Grating name. Must be one of the gratings with parameters
             defined by :attr:`available_gratings`. If None, use
@@ -710,15 +711,16 @@ class TMTWFOSArm(SlitSpectrographArm):
             set to the Littrow value. If None, the grating angle is
             set to the Bragg angle for the central wavelength.
     """
-    telescope = telescopes.TMTTelescope()
     focal_length_coll = 4500.
     focal_plane_limits = [-90, 90, -249, 249]
     default_grating = None
-    def __init__(self, grating=None, cen_wave=None, grating_angle=None):
+    def __init__(self, reflectivity='req', grating=None, cen_wave=None, grating_angle=None):
+        telescope = telescopes.TMTTelescope(reflectivity=reflectivity)
         grating = WFOSGrating(self.default_grating if grating is None else grating)
         if cen_wave is None and grating_angle is None:
             cen_wave = grating.peak_wave
-        super(TMTWFOSArm, self).__init__(grating, cen_wave=cen_wave, grating_angle=grating_angle)
+        super(TMTWFOSArm, self).__init__(telescope, grating, cen_wave=cen_wave,
+                                         grating_angle=grating_angle)
 
 
 class TMTWFOSBlue(TMTWFOSArm):
@@ -728,8 +730,8 @@ class TMTWFOSBlue(TMTWFOSArm):
     the instantiation arguments and methods.
     """
     det = detector.Detector((4*4096, 2*4096), pixelsize=15., rn=2., dark=0.0)
-    cam_kernel = kernel.SpectrographGaussianKernel(*list(numpy.array([0.2, 0.2])
-                                                            * TMTWFOSArm.telescope.platescale))
+#    cam_kernel = kernel.SpectrographGaussianKernel(*list(numpy.array([0.2, 0.2])
+#                                                            * TMTWFOSArm.telescope.platescale))
     focal_length_cam = 600.
     max_field_angle_cam = 12.
 
@@ -755,8 +757,8 @@ class TMTWFOSRed(TMTWFOSArm):
     """
 
     det = detector.Detector((4*4096, 2*4096), pixelsize=15., rn=2., dark=0.0)
-    cam_kernel = kernel.SpectrographGaussianKernel(*list(numpy.array([0.2, 0.2])
-                                                            * TMTWFOSArm.telescope.platescale))
+#    cam_kernel = kernel.SpectrographGaussianKernel(*list(numpy.array([0.2, 0.2])
+#                                                            * TMTWFOSArm.telescope.platescale))
     focal_length_cam = 600.
     max_field_angle_cam = 12.
 
